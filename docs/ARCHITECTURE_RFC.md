@@ -1086,6 +1086,124 @@ curl -s http://localhost:3000/  # should redirect to login
 
 ---
 
+## SECTION 9 — OpenClaw Trust Model: Orchestrator / Browser Paradigm
+
+This section formalises the security stance for OpenClaw and any future agentic runtimes in the
+stack. The model mirrors Anthropic's own agent safety guidance: treat the environment as untrusted,
+separate credential-holding processes from action-taking processes.
+
+### 9.1 The Two-Tier Model
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  ORCHESTRATOR TIER                                              │
+│  openclaw-gateway                                               │
+│  • Holds all session credentials (CLAUDE_*_SESSION_KEY, etc.)  │
+│  • Holds openclaw.json (Telegram token, skill API keys)         │
+│  • Directs tool calls and model calls                           │
+│  • Trusts tool outputs structurally, not verbatim               │
+└──────────────────────────────┬──────────────────────────────────┘
+                               │ gateway token only (OPENCLAW_GATEWAY_TOKEN)
+                               ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  BROWSER / WORKER TIER                                          │
+│  openclaw-cli  (and future: openclaw-browser)                   │
+│  • Holds gateway token ONLY — zero session credentials          │
+│  • Workspace files: read-only                                   │
+│  • Config dir (openclaw.json): NOT mounted                      │
+│  • Egress to RFC1918 / metadata blocked (see §9.4)              │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Core invariants:**
+1. **No credentials in the browser tier.** A compromised or prompt-injected worker cannot exfiltrate Claude/Anthropic session tokens.
+2. **Config is read-only or absent in the browser tier.** `openclaw.json` (which contains Telegram tokens and skill API keys) is mounted only in the orchestrator container.
+3. **Workspace is read-only in the browser tier.** Workers can read workspace files; only the orchestrator writes them.
+4. **Egress from browser-tier containers is blocked to RFC1918 + metadata endpoints** to prevent SSRF pivoting to internal services.
+
+### 9.2 Container Trust Tier Map
+
+| Container | Tier | Session Credentials | openclaw.json | Workspace | Egress |
+|-----------|------|---------------------|---------------|-----------|--------|
+| `openclaw-gateway` | Orchestrator | ✓ All (`CLAUDE_*`) | ✓ Read-write | ✓ Read-write | Allowed (needs model-gateway, mcp) |
+| `openclaw-cli` | Browser-tier | ✗ None | ✗ Not mounted | Read-only | RFC1918 blocked (§9.4) |
+| `openclaw-browser` *(future)* | Browser-tier | ✗ None | ✗ Not mounted | ✗ Not mounted | RFC1918 + metadata blocked |
+
+### 9.3 Container Hardening (both tiers)
+
+Both containers run with:
+```yaml
+cap_drop: [ALL]
+security_opt: ["no-new-privileges:true"]
+```
+
+`openclaw-gateway` additionally has:
+```yaml
+deploy:
+  resources:
+    limits:
+      memory: 2G
+healthcheck:
+  test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:18789"]
+  start_period: 60s
+  interval: 30s
+  timeout: 10s
+  retries: 3
+```
+
+`openclaw-cli` has `restart: "no"` because it is an interactive/on-demand process; it must not
+restart automatically and re-acquire a token without user intent.
+
+### 9.4 Egress Control for Browser-Tier Containers
+
+When a browser/playwright feature is active, the worker container can make arbitrary outbound HTTP
+requests. Without egress controls, a malicious page or prompt injection can reach internal services
+(Ollama, ops-controller, cloud metadata).
+
+Apply RFC1918 + metadata blocks via `scripts/ssrf-egress-block.sh`:
+
+```bash
+# Block the openclaw network specifically (auto-detects ai-toolkit-openclaw subnet):
+./scripts/ssrf-egress-block.sh --target openclaw
+
+# Block both MCP and openclaw in one pass:
+./scripts/ssrf-egress-block.sh --target all
+```
+
+The script blocks:
+- `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16` (RFC1918)
+- `100.64.0.0/10` (Tailscale CGNAT)
+- `169.254.169.254/32`, `169.254.170.2/32` (cloud metadata)
+
+DNS (port 53) is explicitly allowed so external hostnames still resolve.
+
+### 9.5 Prompt Injection Defense at the Tool-Output Boundary
+
+Tool outputs returned from browser or MCP calls flow back to the orchestrator as context. To
+prevent injected instructions from escalating privileges:
+
+- Tool results are returned in a structured `<tool_result>` boundary by the MCP bridge plugin,
+  keeping them separate from the system prompt and user message context.
+- The orchestrator must treat tool output as **data**, not as **instructions**.
+- Validate tool output schemas where possible (see MCP `registry.json` `outputSchema` field).
+- If a tool result contains instruction-like text (e.g. `Ignore previous instructions…`), the
+  structured boundary ensures the model can distinguish it from a genuine user or system prompt.
+
+### 9.6 Secret Handling Summary (OpenClaw-specific)
+
+| Secret | Location | Injected by | Notes |
+|--------|----------|-------------|-------|
+| `OPENCLAW_GATEWAY_TOKEN` | `.env` | Compose `environment:` | Orchestrator + CLI (bridge auth only) |
+| `CLAUDE_AI_SESSION_KEY` | `.env` | Compose `environment:` (gateway only) | Never in CLI container |
+| `CLAUDE_WEB_SESSION_KEY` | `.env` | Compose `environment:` (gateway only) | Never in CLI container |
+| `CLAUDE_WEB_COOKIE` | `.env` | Compose `environment:` (gateway only) | Never in CLI container |
+| Telegram bot token | `data/openclaw/openclaw.json` | OpenClaw config sync | Gitignored; do not include in unencrypted cloud backups |
+| Skill API keys | `data/openclaw/openclaw.json` | OpenClaw config sync | Same as above |
+
+**Rotation:** See `docs/runbooks/SECURITY_HARDENING.md` §5 (token rotation) and §11 (openclaw secrets).
+
+---
+
 ## Appendix A — Environment Variables Reference
 
 | Variable | Service | Description | Default |
