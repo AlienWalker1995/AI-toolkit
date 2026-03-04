@@ -183,6 +183,7 @@ services:
       - DEFAULT_MODELS=${DEFAULT_MODEL:-}
       # RAG: use Qdrant for vector storage
       - VECTOR_DB=qdrant
+      - QDRANT_URI=http://qdrant:6333
       - QDRANT_URL=http://qdrant:6333
     volumes:
       - ${DATA_PATH:-${BASE_PATH:-.}/data}/open-webui:/app/backend/data
