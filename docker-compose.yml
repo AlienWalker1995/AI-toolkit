@@ -308,6 +308,9 @@ services:
     environment:
       - MCP_CONFIG_FILE=/mcp-config/servers.txt
       - MCP_GATEWAY_PORT=8811
+      # MCP server API keys — set these in the root .env file
+      - GITHUB_PERSONAL_ACCESS_TOKEN=${GITHUB_PERSONAL_ACCESS_TOKEN:-}
+      - BRAVE_API_KEY=${BRAVE_API_KEY:-}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ${DATA_PATH:-${BASE_PATH:-.}/data}/mcp:/mcp-config
@@ -323,9 +326,6 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
-    # Optional: mount secrets for MCPs that need API keys (e.g. github-official, brave)
-    # secrets: [mcp_secrets]
-    # Uncomment and create mcp/.env with GITHUB_PERSONAL_ACCESS_TOKEN etc.
     networks:
       - frontend
 
