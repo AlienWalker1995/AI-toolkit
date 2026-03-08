@@ -1191,11 +1191,39 @@
     </section>
 
     <section id="models-section">
-      <h2>Model Library</h2>
-      <p class="section-desc">Pull Ollama LLMs and ComfyUI LTX-2 models. Sync to OpenClaw when you add or remove models.</p>
+      <h2>Model Hub</h2>
+      <p class="section-desc">Download from HuggingFace or any URL — auto-routes to Ollama (LLMs / GGUF) or ComfyUI (diffusion models). Sync models to OpenClaw.</p>
+
+      <!-- Unified download row -->
+      <div class="model-panel" style="margin-bottom:var(--space-6);">
+        <h3>Download from HuggingFace / URL</h3>
+        <div style="font-size:var(--text-sm);color:var(--fg-muted);margin-bottom:var(--space-3);">
+          <strong>Ollama</strong>: model name (<code>llama3.2:8b</code>, <code>hf.co/bartowski/Llama-3.2-3B-Instruct-GGUF</code>) or HF GGUF URL — auto-converts.<br>
+          <strong>ComfyUI</strong>: paste a direct <code>.safetensors</code> / <code>.ckpt</code> URL — downloaded by the ops-controller (no permission issues).
+        </div>
+        <div class="pull-row" style="flex-wrap:wrap;gap:var(--space-2);align-items:center;">
+          <input type="text" id="hub-dl-input" placeholder="Model name, hf.co/owner/repo, or https://... URL"
+            style="flex:1;min-width:260px;padding:var(--space-2) var(--space-3);background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--fg);font-size:var(--text-sm);font-family:var(--font-mono);"
+            aria-label="Model name or URL">
+          <select id="hub-dl-category" style="padding:var(--space-2) var(--space-3);background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--fg);font-size:var(--text-sm);" aria-label="ComfyUI category (for diffusion files only)">
+            <option value="">Category: auto-detect</option>
+            <option value="checkpoints">checkpoints</option>
+            <option value="loras">loras</option>
+            <option value="text_encoders">text_encoders</option>
+            <option value="latent_upscale_models">latent_upscale_models</option>
+          </select>
+          <div id="hub-dl-target-badge" style="font-size:0.75rem;padding:2px 8px;border-radius:4px;background:var(--surface);color:var(--fg-muted);border:1px solid var(--border);white-space:nowrap;">auto</div>
+          <button id="hub-dl-btn">Download / Pull</button>
+        </div>
+        <div id="hub-dl-progress" class="progress-area" style="display:none;" role="region" aria-label="Download progress">
+          <div class="progress-bar"><div class="fill" id="hub-dl-bar" style="width:0%" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"></div></div>
+          <div class="log" id="hub-dl-log" role="log" aria-live="polite"></div>
+        </div>
+      </div>
+
       <div class="models-grid">
         <div class="model-panel">
-          <h3>Ollama — LLM & embeddings</h3>
+          <h3>Ollama — LLMs & embeddings</h3>
           <div class="model-list" id="ollama-models">
             <div class="skeleton skeleton-line"></div>
             <div class="skeleton skeleton-line short"></div>
@@ -1241,7 +1269,7 @@
           </div>
         </div>
         <div class="model-panel">
-          <h3>ComfyUI — LTX-2 image gen</h3>
+          <h3>ComfyUI — diffusion models</h3>
           <div class="model-list" id="comfyui-models">
             <div class="skeleton skeleton-line"></div>
             <div class="skeleton skeleton-line short"></div>
@@ -1252,24 +1280,6 @@
             </div>
             <div id="comfyui-progress" class="progress-area" style="display:none;" role="region" aria-label="ComfyUI pull progress">
               <div class="log" id="comfyui-log" role="log" aria-live="polite"></div>
-            </div>
-          </div>
-          <div class="pull-area" style="margin-top:var(--space-3);border-top:1px solid var(--border);padding-top:var(--space-3);">
-            <div style="font-size:var(--text-sm);color:var(--fg-muted);margin-bottom:var(--space-2);">Download model by URL <span style="color:var(--muted);font-size:0.8em;">(HuggingFace, Civitai, etc.)</span></div>
-            <div class="pull-row" style="flex-wrap:wrap;gap:var(--space-2);">
-              <input type="text" id="comfyui-dl-url" placeholder="https://huggingface.co/..." style="flex:1;min-width:200px;padding:var(--space-2) var(--space-3);background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--fg);font-size:var(--text-sm);font-family:var(--font-mono);" aria-label="Model download URL">
-              <select id="comfyui-dl-category" style="padding:var(--space-2) var(--space-3);background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--fg);font-size:var(--text-sm);" aria-label="Model category">
-                <option value="">Auto-detect</option>
-                <option value="checkpoints">checkpoints</option>
-                <option value="loras">loras</option>
-                <option value="text_encoders">text_encoders</option>
-                <option value="latent_upscale_models">latent_upscale_models</option>
-              </select>
-              <button id="comfyui-dl-btn">Download</button>
-            </div>
-            <div id="comfyui-dl-progress" class="progress-area" style="display:none;" role="region" aria-label="Download progress">
-              <div class="progress-bar"><div class="fill" id="comfyui-dl-bar" style="width:0%" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"></div></div>
-              <div class="log" id="comfyui-dl-log" role="log" aria-live="polite"></div>
             </div>
           </div>
         </div>
@@ -2112,54 +2122,131 @@
       }
     };
 
-    // --- ComfyUI URL download ---
-    document.getElementById('comfyui-dl-btn').onclick = async () => {
-      const btn = document.getElementById('comfyui-dl-btn');
-      const urlInput = document.getElementById('comfyui-dl-url');
-      const catSelect = document.getElementById('comfyui-dl-category');
-      const prog = document.getElementById('comfyui-dl-progress');
-      const logEl = document.getElementById('comfyui-dl-log');
-      const barEl = document.getElementById('comfyui-dl-bar');
-      const url = urlInput.value.trim();
-      if (!url) { toast('Paste a model URL first', 'error'); return; }
-      btn.disabled = true;
-      prog.style.display = 'block';
-      logEl.textContent = 'Starting download...';
-      barEl.style.width = '0%';
-      try {
-        const r = await api('/api/comfyui/download', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ url, category: catSelect.value }),
-        });
-        const d = await r.json();
-        if (!r.ok) { throw new Error(d.detail || 'Failed to start download'); }
-        logEl.textContent = `Downloading ${d.filename} → ${d.category}/`;
-        const poll = () => {
-          api('/api/comfyui/download/status').then(r => r.json()).then(s => {
-            logEl.textContent = s.output || 'Downloading...';
-            logEl.scrollTop = logEl.scrollHeight;
-            if (s.progress > 0) {
-              barEl.style.width = s.progress + '%';
-              barEl.setAttribute('aria-valuenow', s.progress);
-            }
-            if (s.running) setTimeout(poll, 1000);
-            else {
-              logEl.textContent += '\n' + (s.success ? '✓ Done.' : '✗ Failed.');
-              barEl.style.width = s.success ? '100%' : barEl.style.width;
-              toast(s.success ? `Downloaded ${d.filename}` : 'Download failed', s.success ? 'success' : 'error');
-              btn.disabled = false;
-              if (s.success) { urlInput.value = ''; loadComfyuiModels(); }
-            }
-          });
-        };
-        poll();
-      } catch (e) {
-        logEl.textContent += '\nError: ' + e.message;
-        toast('Download failed: ' + e.message, 'error');
-        btn.disabled = false;
+    // --- Unified Model Hub download ---
+    (function () {
+      const hubInput = document.getElementById('hub-dl-input');
+      const hubBadge = document.getElementById('hub-dl-target-badge');
+      const hubCat   = document.getElementById('hub-dl-category');
+      const DIFFUSION_EXTS = ['.safetensors', '.ckpt', '.pt', '.pth', '.bin'];
+
+      function detectTarget(val) {
+        const v = val.trim().toLowerCase();
+        return DIFFUSION_EXTS.some(e => v.endsWith(e)) ? 'comfyui' : 'ollama';
       }
-    };
+
+      function updateBadge(val) {
+        const t = detectTarget(val);
+        hubBadge.textContent = t;
+        hubBadge.style.color = t === 'ollama' ? 'var(--accent)' : 'var(--fg-muted)';
+        hubCat.style.display = t === 'comfyui' ? '' : 'none';
+      }
+
+      if (hubInput) {
+        hubInput.addEventListener('input', () => updateBadge(hubInput.value));
+        updateBadge('');
+      }
+
+      document.getElementById('hub-dl-btn')?.addEventListener('click', async () => {
+        const btn   = document.getElementById('hub-dl-btn');
+        const prog  = document.getElementById('hub-dl-progress');
+        const logEl = document.getElementById('hub-dl-log');
+        const barEl = document.getElementById('hub-dl-bar');
+        const val   = (hubInput?.value || '').trim();
+        if (!val) { toast('Enter a model name or URL', 'error'); return; }
+        const target = detectTarget(val);
+
+        btn.disabled = true;
+        prog.style.display = 'block';
+        logEl.textContent = target === 'ollama' ? 'Starting pull…' : 'Starting download…';
+        barEl.style.width = '0%';
+        barEl.setAttribute('aria-valuenow', 0);
+
+        try {
+          const extraHeaders = target === 'ollama'
+            ? { 'Accept': 'application/x-ndjson', 'Content-Type': 'application/json' }
+            : { 'Content-Type': 'application/json' };
+          const r = await api('/api/models/download', {
+            method: 'POST',
+            headers: extraHeaders,
+            body: JSON.stringify({ url: val, category: hubCat?.value || '' }),
+          });
+
+          if (!r.ok && target === 'comfyui') {
+            const d = await r.json().catch(() => ({}));
+            throw new Error(d.detail || `HTTP ${r.status}`);
+          }
+
+          if (target === 'ollama') {
+            // Stream NDJSON from Ollama pull
+            const reader = r.body.getReader();
+            const decoder = new TextDecoder();
+            let buf = '';
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              buf += decoder.decode(value, { stream: true });
+              const lines = buf.split('\n');
+              buf = lines.pop();
+              for (const line of lines) {
+                if (!line.trim()) continue;
+                try {
+                  const msg = JSON.parse(line);
+                  if (msg.error) throw new Error(msg.error);
+                  if (msg.completed && msg.total) {
+                    const pct = Math.round(msg.completed * 100 / msg.total);
+                    barEl.style.width = pct + '%';
+                    barEl.setAttribute('aria-valuenow', pct);
+                    logEl.textContent = `${msg.status || 'pulling'} — ${pct}%`;
+                  } else if (msg.status) {
+                    logEl.textContent = msg.status;
+                  }
+                  logEl.scrollTop = logEl.scrollHeight;
+                } catch (parseErr) {
+                  if (parseErr.message !== 'SyntaxError') logEl.textContent += '\n' + parseErr.message;
+                }
+              }
+            }
+            barEl.style.width = '100%';
+            logEl.textContent += '\n✓ Done.';
+            toast(`Pulled: ${val}`, 'success');
+            loadOllamaModels?.();
+            btn.disabled = false;
+          } else {
+            // ComfyUI file: poll status
+            const d = await r.json();
+            logEl.textContent = `Downloading ${d.filename || val} → ${d.category || 'checkpoints'}/`;
+            const poll = () => {
+              api('/api/models/download/status').then(r2 => r2.json()).then(s => {
+                logEl.textContent = s.output || 'Downloading…';
+                logEl.scrollTop = logEl.scrollHeight;
+                if (s.progress > 0) {
+                  barEl.style.width = s.progress + '%';
+                  barEl.setAttribute('aria-valuenow', s.progress);
+                }
+                if (s.running) {
+                  setTimeout(poll, 1000);
+                } else {
+                  logEl.textContent += '\n' + (s.success ? '✓ Done.' : '✗ Failed.');
+                  if (s.success) barEl.style.width = '100%';
+                  toast(s.success ? `Downloaded ${d.filename || val}` : 'Download failed', s.success ? 'success' : 'error');
+                  if (s.success) { hubInput.value = ''; updateBadge(''); loadComfyuiModels?.(); }
+                  btn.disabled = false;
+                }
+              }).catch(e => {
+                logEl.textContent += '\nPoll error: ' + e.message;
+                btn.disabled = false;
+              });
+            };
+            poll();
+            return; // btn re-enabled by poll
+          }
+        } catch (e) {
+          logEl.textContent += '\nError: ' + e.message;
+          toast('Download failed: ' + e.message, 'error');
+          btn.disabled = false;
+        }
+      });
+    }());
 
     // --- OpenClaw model management ---
     async function loadOpenclawModels() {
