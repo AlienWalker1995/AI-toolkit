@@ -17,6 +17,7 @@ dirs=(
   "$data/comfyui-output"
   "$data/n8n-data"
   "$data/n8n-files"
+  "$data/dashboard"
   "$data/openclaw"
   "$data/openclaw/workspace"
   "$base/models/comfyui/checkpoints"
@@ -29,6 +30,11 @@ for d in "${dirs[@]}"; do
   mkdir -p "$d"
   echo "OK $d"
 done
+
+# Fix ownership for non-root dashboard (PRD §5): models and data must be writable by uid 1000
+if command -v chown >/dev/null 2>&1; then
+  chown -R 1000:1000 "$base/models/comfyui" "$data" 2>/dev/null && echo "OK chown models+data (dashboard non-root)" || true
+fi
 
 # Bootstrap openclaw.json with Ollama provider if config doesn't exist
 openclaw_config="$data/openclaw/openclaw.json"
@@ -75,6 +81,12 @@ fi
 detect_script="$base/scripts/detect_hardware.py"
 if [[ -f "$detect_script" ]]; then
   BASE_PATH="$base" python3 "$detect_script" 2>/dev/null && echo "OK Hardware detected (overrides/compute.yml)"
+fi
+
+# SSRF egress block: run after first 'docker compose up' to block cloud metadata access from MCP containers.
+# See docs/runbooks/SECURITY_HARDENING.md
+if [[ -f "$base/scripts/ssrf-egress-block.sh" ]] && command -v iptables >/dev/null 2>&1; then
+  echo "Note: After first 'docker compose up', run: sudo ./scripts/ssrf-egress-block.sh (blocks SSRF from MCP)"
 fi
 
 echo "Directories ready."

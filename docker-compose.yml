@@ -13,7 +13,7 @@ services:
     healthcheck:
       # Image has no curl/wget; use ollama CLI to probe the server
       test: ["CMD", "ollama", "list"]
-      start_period: 30s
+      start_period: 120s
       interval: 15s
       timeout: 10s
       retries: 5
@@ -47,6 +47,7 @@ services:
       - VLLM_URL=${VLLM_URL:-}
       - DEFAULT_PROVIDER=ollama
       - DASHBOARD_URL=http://dashboard:8080
+      - THROUGHPUT_RECORD_TOKEN=${THROUGHPUT_RECORD_TOKEN:-}
       - MODEL_CACHE_TTL_SEC=${MODEL_CACHE_TTL_SEC:-60}
       # Cap Ollama KV cache. Ollama pre-allocates the full model max (often 128K+)
       # even for short prompts, killing CPU throughput. 16384 tokens covers most
@@ -151,12 +152,15 @@ services:
       - OPS_CONTROLLER_TOKEN=${OPS_CONTROLLER_TOKEN:-}
       - DASHBOARD_AUTH_TOKEN=${DASHBOARD_AUTH_TOKEN:-}
       - DASHBOARD_PASSWORD=${DASHBOARD_PASSWORD:-}
+      - THROUGHPUT_RECORD_TOKEN=${THROUGHPUT_RECORD_TOKEN:-}
       # OpenClaw model management: dashboard reads/writes openclaw.json to sync models
       - MODEL_GATEWAY_URL=http://model-gateway:11435
       - OPENCLAW_CONFIG_PATH=/openclaw-config/openclaw.json
+      - DASHBOARD_DATA_PATH=/data/dashboard
     volumes:
       - ${BASE_PATH:-.}/models/comfyui:/models
       - ${BASE_PATH:-.}/scripts:/scripts:ro
+      - ${DATA_PATH:-${BASE_PATH:-.}/data}/dashboard:/data/dashboard
       - ${DATA_PATH:-${BASE_PATH:-.}/data}/mcp:/mcp-config
       - ${OPENCLAW_CONFIG_DIR:-${BASE_PATH:-.}/data/openclaw}:/openclaw-config
     networks:
@@ -178,6 +182,7 @@ services:
           memory: 1G
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/"]
+      start_period: 120s
       interval: 30s
       timeout: 10s
       retries: 3
@@ -250,10 +255,12 @@ services:
         limits:
           memory: 4G
     # ComfyUI: run scripts/detect_hardware.py to auto-configure GPU (NVIDIA/AMD/Intel) or CPU
+    # Bound to localhost only (no auth). Use SSH tunnel for remote access.
     ports:
-      - "8188:8188"
+      - "127.0.0.1:8188:8188"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8188/"]
+      start_period: 120s
       interval: 30s
       timeout: 10s
       retries: 3
@@ -273,14 +280,15 @@ services:
       - frontend
 
   n8n:
-    image: ${N8N_IMAGE:-docker.n8n.io/n8nio/n8n}
+    image: ${N8N_IMAGE:-docker.n8n.io/n8nio/n8n:2.10.2}
     restart: unless-stopped
     # Run as non-root (n8n image uses node user; 1000:1000 matches typical node uid)
     user: "1000:1000"
     depends_on:
       - mcp-gateway
+    # Bound to localhost only (no auth). Use SSH tunnel for remote access.
     ports:
-      - "5678:5678"
+      - "127.0.0.1:5678:5678"
     deploy:
       resources:
         limits:
@@ -312,6 +320,7 @@ services:
       - ${DATA_PATH:-${BASE_PATH:-.}/data}/n8n-files:/files
     networks:
       - frontend
+      - backend
 
   mcp-gateway:
     build: ./mcp
@@ -332,8 +341,7 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ${DATA_PATH:-${BASE_PATH:-.}/data}/mcp:/mcp-config
-    ports:
-      - "${MCP_GATEWAY_PORT:-8811}:8811"
+    # No host port by default (backend-only per PRD M6). For external MCP access: -f overrides/mcp-expose.yml
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:8811/mcp"]
       interval: 30s
@@ -345,7 +353,7 @@ services:
         max-size: "10m"
         max-file: "3"
     networks:
-      - frontend
+      - backend
 
   openclaw-workspace-sync:
     image: alpine:3
@@ -401,6 +409,8 @@ services:
     depends_on:
       openclaw-config-sync:
         condition: service_completed_successfully
+      mcp-gateway:
+        condition: service_started
     environment:
       - MCP_GATEWAY_URL=http://mcp-gateway:${MCP_GATEWAY_PORT:-8811}/mcp
     volumes:
@@ -409,8 +419,10 @@ services:
     entrypoint: ["python3", "/scripts/add_mcp_plugin_config.py"]
     networks:
       - frontend
+      - backend
 
   openclaw-gateway:
+    # Pin to digest when available; only :latest published upstream
     image: ${OPENCLAW_IMAGE:-ghcr.io/phioranex/openclaw-docker:latest}
     container_name: openclaw-gateway
     depends_on:
@@ -517,6 +529,12 @@ services:
     profiles: [rag]
     build: ./rag-ingestion
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "test", "-f", "/tmp/rag-ingestion.heartbeat"]
+      start_period: 60s
+      interval: 30s
+      timeout: 5s
+      retries: 3
     environment:
       - MODEL_GATEWAY_URL=http://model-gateway:11435
       - EMBED_MODEL=${EMBED_MODEL:-nomic-embed-text}
