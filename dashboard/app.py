@@ -117,8 +117,6 @@ OLLAMA_LIBRARY_FALLBACK = [
 # Background ComfyUI pull status
 _comfyui_status: dict = {"running": False, "output": "", "done": False, "success": None}
 
-# Background ComfyUI URL download status
-_comfyui_dl_status: dict = {"running": False, "output": "", "done": False, "success": None, "progress": 0}
 
 
 class PullRequest(BaseModel):
@@ -353,133 +351,79 @@ async def comfyui_pull_status():
         return dict(_comfyui_status)
 
 
-class ComfyUIDownloadRequest(BaseModel):
+class ModelDownloadRequest(BaseModel):
     url: str
     category: str = ""
     filename: str = ""
 
 
-def _auto_detect_category(url: str, filename: str) -> str:
-    """Guess ComfyUI category from URL path or filename."""
-    parts = url.lower().replace("\\", "/")
-    for cat in COMFYUI_CATEGORIES:
-        if cat in parts:
-            return cat
-    fn = filename.lower()
-    if fn.endswith((".safetensors", ".ckpt", ".pt", ".pth", ".bin")):
-        if "lora" in fn or "lora" in parts:
-            return "loras"
-        if "text_encoder" in parts or "text_encoder" in fn:
-            return "text_encoders"
-        if "upscale" in parts or "upscale" in fn:
-            return "latent_upscale_models"
-    return "checkpoints"
+def _hf_url_to_ollama(raw: str) -> str:
+    """Convert a HuggingFace GGUF URL to Ollama's hf.co/owner/repo format.
+    Non-HF strings (model names, hf.co/ refs) are returned as-is.
+    """
+    if "huggingface.co/" in raw:
+        # https://huggingface.co/owner/repo/resolve/main/file.gguf → hf.co/owner/repo
+        try:
+            path = raw.split("huggingface.co/")[1].split("/resolve/")[0]
+            return f"hf.co/{path}"
+        except IndexError:
+            pass
+    return raw
 
 
-def _run_comfyui_download(url: str, category: str, filename: str):
-    """Download a file from URL to the ComfyUI models directory. Resumable via Range header."""
-    global _comfyui_dl_status
-    with _state_lock:
-        _comfyui_dl_status = {"running": True, "output": "", "done": False, "success": None, "progress": 0}
-    dest_dir = MODELS_DIR / category
-    dest_dir.mkdir(parents=True, exist_ok=True)
-    dest = dest_dir / filename
-    temp_path = dest.with_suffix(dest.suffix + ".tmp")
-    try:
-        # Check for partial file to resume
-        start_byte = 0
-        if temp_path.exists():
-            start_byte = temp_path.stat().st_size
-        headers = {"User-Agent": "AI-toolkit-dashboard/1.0"}
-        if start_byte > 0:
-            headers["Range"] = f"bytes={start_byte}-"
-        with httpx.Client(timeout=60.0, follow_redirects=True) as client:
-            with client.stream("GET", url, headers=headers) as r:
-                # Verify content type for .safetensors / model files (S11)
-                ct = (r.headers.get("Content-Type") or "").lower()
-                if filename.endswith(".safetensors") and ct and "octet-stream" not in ct and "safetensors" not in ct:
-                    raise ValueError(f"Unexpected Content-Type {ct}; expected application/octet-stream")
-                r.raise_for_status()
-                total_header = r.headers.get("Content-Range") or r.headers.get("Content-Length")
-                total = 0
-                if total_header and "/" in str(total_header):
-                    total = int(str(total_header).split("/")[-1].strip())
-                elif r.headers.get("Content-Length"):
-                    total = int(r.headers["Content-Length"]) + (start_byte if start_byte else 0)
-                total_mb = total / (1024 * 1024) if total else 0
-                downloaded = start_byte
-                chunk_size = 1024 * 1024  # 1MB chunks
-                mode = "ab" if start_byte else "wb"
-                with open(temp_path, mode) as f:
-                    for chunk in r.iter_bytes(chunk_size=chunk_size):
-                        f.write(chunk)
-                        downloaded += len(chunk)
-                        dl_mb = downloaded / (1024 * 1024)
-                        pct = int(downloaded * 100 / total) if total else 0
-                        msg = f"Downloading {filename} to {category}/\n"
-                        if total:
-                            msg += f"{dl_mb:.0f} / {total_mb:.0f} MB ({pct}%)"
-                        else:
-                            msg += f"{dl_mb:.0f} MB downloaded"
-                        with _state_lock:
-                            _comfyui_dl_status["output"] = msg
-                            _comfyui_dl_status["progress"] = pct
-        temp_path.rename(dest)
-        with _state_lock:
-            _comfyui_dl_status["success"] = True
-            _comfyui_dl_status["output"] += f"\nDone — saved to {category}/{filename}"
-    except Exception as e:
-        with _state_lock:
-            _comfyui_dl_status["output"] += f"\nError: {e}"
-            _comfyui_dl_status["success"] = False
-        if temp_path.exists():
-            try:
-                temp_path.unlink()
-            except OSError:
-                pass
-        if dest.exists() and not _comfyui_dl_status.get("success"):
-            try:
-                dest.unlink()
-            except OSError:
-                pass
-    finally:
-        with _state_lock:
-            _comfyui_dl_status["running"] = False
-            _comfyui_dl_status["done"] = True
+@app.post("/api/models/download")
+async def models_download(req: ModelDownloadRequest, request: Request):
+    """Unified model download.
+    - GGUF / Ollama model names → streams Ollama pull (via model-gateway).
+    - safetensors / ckpt / pt / bin → proxied to ops-controller for file download.
+    HuggingFace GGUF URLs are automatically converted to hf.co/owner/repo Ollama format.
+    """
+    raw = req.url.strip()
+    filename = req.filename.strip() or raw.split("/")[-1].split("?")[0]
+
+    # Decide target from extension or URL pattern
+    diffusion_exts = (".safetensors", ".ckpt", ".pt", ".pth", ".bin")
+    is_diffusion = any(filename.lower().endswith(e) for e in diffusion_exts)
+
+    if is_diffusion:
+        # Route to ops-controller (runs without uid 1000 restriction, has /models/comfyui mounted)
+        if not raw.startswith("https://"):
+            raise HTTPException(status_code=400, detail="URL must start with https://")
+        code, data = await _ops_request(
+            "POST", "/models/download", request=request,
+            json={"url": raw, "category": req.category, "filename": req.filename},
+        )
+        if code >= 400:
+            raise HTTPException(status_code=code, detail=data.get("detail", data))
+        return {**data, "target": "comfyui"}
+    else:
+        # Ollama: convert HF URL to hf.co/ format, then stream pull
+        model = _hf_url_to_ollama(raw)
+
+        async def _stream():
+            async with AsyncClient(timeout=3600.0) as client:
+                async with client.stream(
+                    "POST",
+                    f"{MODEL_GATEWAY_URL}/api/pull",
+                    json={"model": model, "stream": True},
+                ) as response:
+                    async for chunk in response.aiter_bytes():
+                        yield chunk
+
+        return StreamingResponse(
+            _stream(),
+            media_type="application/x-ndjson",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
 
 
-@app.post("/api/comfyui/download")
-async def comfyui_download(req: ComfyUIDownloadRequest):
-    """Download a ComfyUI model from a URL to the appropriate category folder."""
-    url = req.url.strip()
-    if not url or not url.startswith("https://"):
-        raise HTTPException(status_code=400, detail="URL must start with https://")
-    with _state_lock:
-        if _comfyui_dl_status.get("running"):
-            raise HTTPException(status_code=409, detail="A download is already in progress")
-    # Derive filename from URL if not provided
-    filename = req.filename.strip()
-    if not filename:
-        filename = url.split("/")[-1].split("?")[0]
-    if not filename or ".." in filename or "/" in filename or "\\" in filename:
-        raise HTTPException(status_code=400, detail="Invalid or undetectable filename")
-    # Derive category
-    category = req.category.strip()
-    if category and category not in COMFYUI_CATEGORIES:
-        raise HTTPException(status_code=400, detail=f"Invalid category. Must be one of: {COMFYUI_CATEGORIES}")
-    if not category:
-        category = _auto_detect_category(url, filename)
-    thread = threading.Thread(target=_run_comfyui_download, args=(url, category, filename))
-    thread.daemon = True
-    thread.start()
-    return {"status": "started", "category": category, "filename": filename}
-
-
-@app.get("/api/comfyui/download/status")
-async def comfyui_download_status():
-    """Get ComfyUI URL download progress."""
-    with _state_lock:
-        return dict(_comfyui_dl_status)
+@app.get("/api/models/download/status")
+async def models_download_status(request: Request):
+    """Poll ComfyUI file download progress (proxied from ops-controller)."""
+    code, data = await _ops_request("GET", "/models/download/status", request=request)
+    if code >= 400:
+        raise HTTPException(status_code=code, detail=data.get("detail", data))
+    return data
 
 
 # --- Services ---

@@ -6,10 +6,12 @@ import logging
 import os
 import re
 import subprocess
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 
 import docker
+import httpx
 from fastapi import Depends, HTTPException, Request
 from fastapi import FastAPI
 from pydantic import BaseModel
@@ -33,6 +35,15 @@ ENV_ALLOWED_KEYS = {"DEFAULT_MODEL"}
 
 BASE_PATH = os.environ.get("BASE_PATH", ".")
 COMPOSE_FILE_ENV = os.environ.get("COMPOSE_FILE", "docker-compose.yml")
+
+# Model download (ComfyUI files)
+COMFYUI_MODELS_DIR = Path(os.environ.get("COMFYUI_MODELS_DIR", "/models/comfyui"))
+COMFYUI_CATEGORIES = ("checkpoints", "loras", "text_encoders", "latent_upscale_models")
+_dl_lock = threading.Lock()
+_dl_status: dict = {
+    "running": False, "output": "", "done": True, "success": None,
+    "progress": 0, "filename": "", "category": "",
+}
 
 
 def _docker_client():
@@ -389,3 +400,131 @@ async def audit(limit: int = 50, _: None = Depends(verify_token)):
         except json.JSONDecodeError:
             continue
     return {"entries": list(reversed(entries))}
+
+
+# --- Model downloads (ComfyUI files) ---
+
+
+def _auto_detect_category(url: str, filename: str) -> str:
+    """Guess ComfyUI model category from URL path or filename."""
+    parts = url.lower()
+    for cat in COMFYUI_CATEGORIES:
+        if cat in parts:
+            return cat
+    fn = filename.lower()
+    if "lora" in fn or "lora" in parts:
+        return "loras"
+    if "text_encoder" in parts or "text_encoder" in fn:
+        return "text_encoders"
+    if "upscale" in parts or "upscale" in fn:
+        return "latent_upscale_models"
+    return "checkpoints"
+
+
+def _run_model_download(url: str, category: str, filename: str, correlation_id: str = "") -> None:
+    """Resumable file download to COMFYUI_MODELS_DIR. Runs in a daemon thread."""
+    with _dl_lock:
+        _dl_status.update({
+            "running": True, "output": f"Starting: {filename}", "done": False,
+            "success": None, "progress": 0, "filename": filename, "category": category,
+        })
+    dest_dir = COMFYUI_MODELS_DIR / category
+    try:
+        dest_dir.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        _audit("model_download", f"{category}/{filename}", "error", str(e)[:200], correlation_id=correlation_id)
+        with _dl_lock:
+            _dl_status.update({"output": f"Cannot create dir: {e}", "success": False, "running": False, "done": True})
+        return
+
+    dest = dest_dir / filename
+    temp_path = dest.with_suffix(dest.suffix + ".tmp")
+    try:
+        start_byte = temp_path.stat().st_size if temp_path.exists() else 0
+        req_headers = {"User-Agent": "AI-toolkit/1.0"}
+        if start_byte > 0:
+            req_headers["Range"] = f"bytes={start_byte}-"
+        with httpx.Client(timeout=60.0, follow_redirects=True) as client:
+            with client.stream("GET", url, headers=req_headers) as r:
+                ct = (r.headers.get("Content-Type") or "").lower()
+                if filename.endswith(".safetensors") and ct and "octet-stream" not in ct and "safetensors" not in ct:
+                    raise ValueError(f"Unexpected Content-Type {ct!r}; expected octet-stream")
+                r.raise_for_status()
+                total_header = r.headers.get("Content-Range") or r.headers.get("Content-Length")
+                total = 0
+                if total_header and "/" in str(total_header):
+                    total = int(str(total_header).split("/")[-1].strip())
+                elif r.headers.get("Content-Length"):
+                    total = int(r.headers["Content-Length"]) + (start_byte or 0)
+                total_mb = total / (1024 * 1024) if total else 0
+                downloaded = start_byte
+                with open(temp_path, "ab" if start_byte else "wb") as f:
+                    for chunk in r.iter_bytes(chunk_size=1024 * 1024):
+                        f.write(chunk)
+                        downloaded += len(chunk)
+                        dl_mb = downloaded / (1024 * 1024)
+                        pct = int(downloaded * 100 / total) if total else 0
+                        msg = f"Downloading {filename} → {category}/\n"
+                        msg += f"{dl_mb:.0f} / {total_mb:.0f} MB ({pct}%)" if total else f"{dl_mb:.0f} MB downloaded"
+                        with _dl_lock:
+                            _dl_status["output"] = msg
+                            _dl_status["progress"] = pct
+        temp_path.rename(dest)
+        _audit("model_download", f"{category}/{filename}", "ok", url[:200], correlation_id=correlation_id)
+        with _dl_lock:
+            _dl_status["success"] = True
+            _dl_status["output"] += f"\nDone — saved to {category}/{filename}"
+    except Exception as e:
+        logger.error("Model download failed: %s", e)
+        _audit("model_download", f"{category}/{filename}", "error", str(e)[:200], correlation_id=correlation_id)
+        with _dl_lock:
+            _dl_status["output"] += f"\nError: {e}"
+            _dl_status["success"] = False
+        if temp_path.exists():
+            try:
+                temp_path.unlink()
+            except OSError:
+                pass
+    finally:
+        with _dl_lock:
+            _dl_status["running"] = False
+            _dl_status["done"] = True
+
+
+class ModelDownloadRequest(BaseModel):
+    url: str
+    category: str = ""
+    filename: str = ""
+
+
+@app.post("/models/download")
+async def models_download(body: ModelDownloadRequest, request: Request, _: None = Depends(verify_token)):
+    """Start a resumable file download to the ComfyUI models directory. Auth required. Audited."""
+    url = body.url.strip()
+    if not url.startswith("https://"):
+        raise HTTPException(status_code=400, detail="URL must start with https://")
+    with _dl_lock:
+        if _dl_status.get("running"):
+            raise HTTPException(status_code=409, detail="A download is already in progress")
+    filename = body.filename.strip() or url.split("/")[-1].split("?")[0]
+    if not filename or ".." in filename or "/" in filename or "\\" in filename:
+        raise HTTPException(status_code=400, detail="Invalid or undetectable filename")
+    category = body.category.strip()
+    if category and category not in COMFYUI_CATEGORIES:
+        raise HTTPException(status_code=400, detail=f"Invalid category. Must be one of: {COMFYUI_CATEGORIES}")
+    if not category:
+        category = _auto_detect_category(url, filename)
+    thread = threading.Thread(
+        target=_run_model_download,
+        args=(url, category, filename, _correlation_id(request)),
+        daemon=True,
+    )
+    thread.start()
+    return {"status": "started", "category": category, "filename": filename}
+
+
+@app.get("/models/download/status")
+async def models_download_status(_: None = Depends(verify_token)):
+    """Poll active download progress. Auth required."""
+    with _dl_lock:
+        return dict(_dl_status)

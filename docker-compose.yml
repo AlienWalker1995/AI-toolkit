@@ -93,10 +93,12 @@ services:
       - DATA_PATH=${DATA_PATH:-${BASE_PATH:-.}/data}
       - COMPOSE_FILE=${COMPOSE_FILE:-docker-compose.yml}
       - DEFAULT_MODEL=${DEFAULT_MODEL:-}
+      - COMFYUI_MODELS_DIR=/models/comfyui
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ${BASE_PATH:-.}:/workspace
       - ${DATA_PATH:-${BASE_PATH:-.}/data}/ops-controller:/data
+      - ${BASE_PATH:-.}/models/comfyui:/models/comfyui
     healthcheck:
       test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:9000/health')"]
       interval: 30s
@@ -158,7 +160,7 @@ services:
       - OPENCLAW_CONFIG_PATH=/openclaw-config/openclaw.json
       - DASHBOARD_DATA_PATH=/data/dashboard
     volumes:
-      - ${BASE_PATH:-.}/models/comfyui:/models
+      - ${BASE_PATH:-.}/models/comfyui:/models:ro
       - ${BASE_PATH:-.}/scripts:/scripts:ro
       - ${DATA_PATH:-${BASE_PATH:-.}/data}/dashboard:/data/dashboard
       - ${DATA_PATH:-${BASE_PATH:-.}/data}/mcp:/mcp-config
