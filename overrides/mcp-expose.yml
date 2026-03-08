@@ -1,0 +1,8 @@
+# Expose MCP gateway on host for external MCP clients (Cursor, etc.).
+# Use: docker compose -f docker-compose.yml -f overrides/mcp-expose.yml up -d
+# PRD M6: default is backend-only; this override enables LAN/external access.
+
+services:
+  mcp-gateway:
+    ports:
+      - "${MCP_GATEWAY_PORT:-8811}:8811"

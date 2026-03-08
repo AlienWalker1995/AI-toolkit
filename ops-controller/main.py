@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import subprocess
@@ -14,6 +15,7 @@ from fastapi import FastAPI
 from pydantic import BaseModel
 
 app = FastAPI(title="Ops Controller", version="1.0.0")
+logger = logging.getLogger(__name__)
 
 COMPOSE_PROJECT = os.environ.get("COMPOSE_PROJECT", "ai-toolkit")
 OPS_CONTROLLER_TOKEN = os.environ.get("OPS_CONTROLLER_TOKEN", "")
@@ -61,8 +63,8 @@ def _maybe_rotate_audit_log() -> None:
         if rotated.exists():
             rotated.unlink()
         AUDIT_LOG_PATH.rename(rotated)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("Audit log rotation failed: %s", e)
 
 
 def _audit(
@@ -91,8 +93,8 @@ def _audit(
             entry["metadata"] = metadata
         with open(AUDIT_LOG_PATH, "a") as f:
             f.write(json.dumps(entry) + "\n")
-    except Exception:
-        pass
+    except Exception as e:
+        logger.error("Audit write failed: %s", e)
 
 
 def _get_containers():
@@ -330,6 +332,8 @@ async def env_set(body: EnvSetBody, request: Request, _: None = Depends(verify_t
         raise HTTPException(status_code=400, detail="Set confirm: true to execute")
     if body.key not in ENV_ALLOWED_KEYS:
         raise HTTPException(status_code=400, detail=f"Key not in allowlist: {body.key!r}")
+    if "\n" in body.value or "\r" in body.value:
+        raise HTTPException(status_code=400, detail="Value must not contain newlines")
     env_path = Path("/workspace/.env")
     if not env_path.exists():
         raise HTTPException(status_code=404, detail=".env not found at /workspace/.env")

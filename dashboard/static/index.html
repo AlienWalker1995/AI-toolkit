@@ -1254,6 +1254,24 @@
               <div class="log" id="comfyui-log" role="log" aria-live="polite"></div>
             </div>
           </div>
+          <div class="pull-area" style="margin-top:var(--space-3);border-top:1px solid var(--border);padding-top:var(--space-3);">
+            <div style="font-size:var(--text-sm);color:var(--fg-muted);margin-bottom:var(--space-2);">Download model by URL <span style="color:var(--muted);font-size:0.8em;">(HuggingFace, Civitai, etc.)</span></div>
+            <div class="pull-row" style="flex-wrap:wrap;gap:var(--space-2);">
+              <input type="text" id="comfyui-dl-url" placeholder="https://huggingface.co/..." style="flex:1;min-width:200px;padding:var(--space-2) var(--space-3);background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--fg);font-size:var(--text-sm);font-family:var(--font-mono);" aria-label="Model download URL">
+              <select id="comfyui-dl-category" style="padding:var(--space-2) var(--space-3);background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--fg);font-size:var(--text-sm);" aria-label="Model category">
+                <option value="">Auto-detect</option>
+                <option value="checkpoints">checkpoints</option>
+                <option value="loras">loras</option>
+                <option value="text_encoders">text_encoders</option>
+                <option value="latent_upscale_models">latent_upscale_models</option>
+              </select>
+              <button id="comfyui-dl-btn">Download</button>
+            </div>
+            <div id="comfyui-dl-progress" class="progress-area" style="display:none;" role="region" aria-label="Download progress">
+              <div class="progress-bar"><div class="fill" id="comfyui-dl-bar" style="width:0%" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"></div></div>
+              <div class="log" id="comfyui-dl-log" role="log" aria-live="polite"></div>
+            </div>
+          </div>
         </div>
         <div class="model-panel">
           <h3>OpenClaw — active models</h3>
@@ -2090,6 +2108,55 @@
       } catch (e) {
         logEl.textContent += '\nError: ' + e.message;
         toast('Failed to start pull', 'error');
+        btn.disabled = false;
+      }
+    };
+
+    // --- ComfyUI URL download ---
+    document.getElementById('comfyui-dl-btn').onclick = async () => {
+      const btn = document.getElementById('comfyui-dl-btn');
+      const urlInput = document.getElementById('comfyui-dl-url');
+      const catSelect = document.getElementById('comfyui-dl-category');
+      const prog = document.getElementById('comfyui-dl-progress');
+      const logEl = document.getElementById('comfyui-dl-log');
+      const barEl = document.getElementById('comfyui-dl-bar');
+      const url = urlInput.value.trim();
+      if (!url) { toast('Paste a model URL first', 'error'); return; }
+      btn.disabled = true;
+      prog.style.display = 'block';
+      logEl.textContent = 'Starting download...';
+      barEl.style.width = '0%';
+      try {
+        const r = await api('/api/comfyui/download', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url, category: catSelect.value }),
+        });
+        const d = await r.json();
+        if (!r.ok) { throw new Error(d.detail || 'Failed to start download'); }
+        logEl.textContent = `Downloading ${d.filename} → ${d.category}/`;
+        const poll = () => {
+          api('/api/comfyui/download/status').then(r => r.json()).then(s => {
+            logEl.textContent = s.output || 'Downloading...';
+            logEl.scrollTop = logEl.scrollHeight;
+            if (s.progress > 0) {
+              barEl.style.width = s.progress + '%';
+              barEl.setAttribute('aria-valuenow', s.progress);
+            }
+            if (s.running) setTimeout(poll, 1000);
+            else {
+              logEl.textContent += '\n' + (s.success ? '✓ Done.' : '✗ Failed.');
+              barEl.style.width = s.success ? '100%' : barEl.style.width;
+              toast(s.success ? `Downloaded ${d.filename}` : 'Download failed', s.success ? 'success' : 'error');
+              btn.disabled = false;
+              if (s.success) { urlInput.value = ''; loadComfyuiModels(); }
+            }
+          });
+        };
+        poll();
+      } catch (e) {
+        logEl.textContent += '\nError: ' + e.message;
+        toast('Download failed: ' + e.message, 'error');
         btn.disabled = false;
       }
     };

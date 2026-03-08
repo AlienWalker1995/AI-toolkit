@@ -1,8 +1,10 @@
 """AI-toolkit Dashboard — unified model management and service hub."""
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
+import logging
 import os
 import subprocess
 import threading
@@ -10,11 +12,17 @@ import time
 import urllib.request
 from pathlib import Path
 
+# Lock for shared mutable state accessed from both async handlers and background threads
+_state_lock = threading.Lock()
+
 import psutil
+
+logger = logging.getLogger(__name__)
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+import httpx
 from httpx import AsyncClient
 from pydantic import BaseModel
 
@@ -47,12 +55,33 @@ def _verify_auth(request: Request) -> bool:
 
 
 @app.middleware("http")
+async def security_headers_middleware(request: Request, call_next):
+    """Add CSP and security headers to reduce XSS token theft risk."""
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; "
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+        "font-src https://fonts.gstatic.com; "
+        "script-src 'self' 'unsafe-inline'"
+    )
+    return response
+
+
+@app.middleware("http")
 async def auth_middleware(request: Request, call_next):
     """Require auth for /api/* except /api/health and /api/auth/config."""
     path = request.url.path
     if not path.startswith("/api/"):
         return await call_next(request)
     if path in ("/api/health", "/api/auth/config", "/api/hardware", "/api/rag/status"):
+        return await call_next(request)
+    # /api/throughput/record: requires THROUGHPUT_RECORD_TOKEN when set (model-gateway internal; PRD §3.E)
+    if path == "/api/throughput/record":
+        token = os.environ.get("THROUGHPUT_RECORD_TOKEN", "").strip()
+        if token and request.headers.get("X-Throughput-Token") != token:
+            return JSONResponse(status_code=401, content={"detail": "Invalid or missing X-Throughput-Token"})
         return await call_next(request)
     if _AUTH_REQUIRED and not _verify_auth(request):
         if DASHBOARD_PASSWORD:
@@ -88,6 +117,9 @@ OLLAMA_LIBRARY_FALLBACK = [
 # Background ComfyUI pull status
 _comfyui_status: dict = {"running": False, "output": "", "done": False, "success": None}
 
+# Background ComfyUI URL download status
+_comfyui_dl_status: dict = {"running": False, "output": "", "done": False, "success": None, "progress": 0}
+
 
 class PullRequest(BaseModel):
     model: str
@@ -109,7 +141,8 @@ def _fetch_ollama_library() -> list[str]:
             req = urllib.request.Request(url, headers={"Accept": "application/json"})
             with urllib.request.urlopen(req, timeout=15) as resp:
                 data = json.loads(resp.read().decode())
-        except Exception:
+        except Exception as e:
+            logger.warning("Ollama library fetch failed from %s: %s", url, e)
             continue
 
         names: set[str] = set()
@@ -154,10 +187,10 @@ async def ollama_library():
 
 @app.get("/api/ollama/models")
 async def ollama_models():
-    """List models available in Ollama."""
+    """List models available in Ollama (via model-gateway per PRD Principle 4)."""
     async with AsyncClient(timeout=30.0) as client:
         try:
-            r = await client.get(f"{OLLAMA_URL}/api/tags")
+            r = await client.get(f"{MODEL_GATEWAY_URL}/api/tags")
             r.raise_for_status()
             data = r.json()
             return {"models": data.get("models", []), "ok": True}
@@ -175,7 +208,7 @@ async def ollama_delete(req: PullRequest):
         try:
             r = await client.request(
                 "DELETE",
-                f"{OLLAMA_URL.rstrip('/')}/api/delete",
+                f"{MODEL_GATEWAY_URL.rstrip('/')}/api/delete",
                 json={"name": name},
             )
             if r.status_code == 404:
@@ -190,12 +223,12 @@ async def ollama_delete(req: PullRequest):
 
 @app.post("/api/ollama/pull")
 async def ollama_pull(req: PullRequest):
-    """Stream Ollama model pull progress."""
+    """Stream Ollama model pull progress (via model-gateway)."""
     async def stream():
         async with AsyncClient(timeout=3600.0) as client:
             async with client.stream(
                 "POST",
-                f"{OLLAMA_URL}/api/pull",
+                f"{MODEL_GATEWAY_URL}/api/pull",
                 json={"model": req.model, "stream": True},
             ) as response:
                 async for chunk in response.aiter_bytes():
@@ -235,7 +268,8 @@ def _scan_comfyui_models() -> list[dict]:
 def _run_comfyui_pull():
     """Run ComfyUI model pull script in background."""
     global _comfyui_status
-    _comfyui_status = {"running": True, "output": "", "done": False, "success": None}
+    with _state_lock:
+        _comfyui_status = {"running": True, "output": "", "done": False, "success": None}
     script = SCRIPTS_DIR / "comfyui" / "pull_comfyui_models.py"
     env = os.environ.copy()
     env["MODELS_DIR"] = str(MODELS_DIR)
@@ -251,15 +285,20 @@ def _run_comfyui_pull():
         output_lines = []
         for line in proc.stdout:
             output_lines.append(line)
-            _comfyui_status["output"] = "".join(output_lines)
+            with _state_lock:
+                _comfyui_status["output"] = "".join(output_lines)
         proc.wait()
-        _comfyui_status["success"] = proc.returncode == 0
+        with _state_lock:
+            _comfyui_status["success"] = proc.returncode == 0
     except Exception as e:
-        _comfyui_status["output"] += f"\nError: {e}"
-        _comfyui_status["success"] = False
+        logger.error("ComfyUI pull failed: %s", e)
+        with _state_lock:
+            _comfyui_status["output"] += f"\nError: {e}"
+            _comfyui_status["success"] = False
     finally:
-        _comfyui_status["running"] = False
-        _comfyui_status["done"] = True
+        with _state_lock:
+            _comfyui_status["running"] = False
+            _comfyui_status["done"] = True
 
 
 COMFYUI_CATEGORIES = ("checkpoints", "loras", "text_encoders", "latent_upscale_models")
@@ -298,8 +337,9 @@ async def comfyui_models():
 async def comfyui_pull():
     """Start ComfyUI model pull (LTX-2) in background."""
     global _comfyui_status
-    if _comfyui_status.get("running"):
-        raise HTTPException(status_code=409, detail="Pull already in progress")
+    with _state_lock:
+        if _comfyui_status.get("running"):
+            raise HTTPException(status_code=409, detail="Pull already in progress")
     thread = threading.Thread(target=_run_comfyui_pull)
     thread.daemon = True
     thread.start()
@@ -309,7 +349,137 @@ async def comfyui_pull():
 @app.get("/api/comfyui/pull/status")
 async def comfyui_pull_status():
     """Get ComfyUI pull progress."""
-    return _comfyui_status
+    with _state_lock:
+        return dict(_comfyui_status)
+
+
+class ComfyUIDownloadRequest(BaseModel):
+    url: str
+    category: str = ""
+    filename: str = ""
+
+
+def _auto_detect_category(url: str, filename: str) -> str:
+    """Guess ComfyUI category from URL path or filename."""
+    parts = url.lower().replace("\\", "/")
+    for cat in COMFYUI_CATEGORIES:
+        if cat in parts:
+            return cat
+    fn = filename.lower()
+    if fn.endswith((".safetensors", ".ckpt", ".pt", ".pth", ".bin")):
+        if "lora" in fn or "lora" in parts:
+            return "loras"
+        if "text_encoder" in parts or "text_encoder" in fn:
+            return "text_encoders"
+        if "upscale" in parts or "upscale" in fn:
+            return "latent_upscale_models"
+    return "checkpoints"
+
+
+def _run_comfyui_download(url: str, category: str, filename: str):
+    """Download a file from URL to the ComfyUI models directory. Resumable via Range header."""
+    global _comfyui_dl_status
+    with _state_lock:
+        _comfyui_dl_status = {"running": True, "output": "", "done": False, "success": None, "progress": 0}
+    dest_dir = MODELS_DIR / category
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    dest = dest_dir / filename
+    temp_path = dest.with_suffix(dest.suffix + ".tmp")
+    try:
+        # Check for partial file to resume
+        start_byte = 0
+        if temp_path.exists():
+            start_byte = temp_path.stat().st_size
+        headers = {"User-Agent": "AI-toolkit-dashboard/1.0"}
+        if start_byte > 0:
+            headers["Range"] = f"bytes={start_byte}-"
+        with httpx.Client(timeout=60.0, follow_redirects=True) as client:
+            with client.stream("GET", url, headers=headers) as r:
+                # Verify content type for .safetensors / model files (S11)
+                ct = (r.headers.get("Content-Type") or "").lower()
+                if filename.endswith(".safetensors") and ct and "octet-stream" not in ct and "safetensors" not in ct:
+                    raise ValueError(f"Unexpected Content-Type {ct}; expected application/octet-stream")
+                r.raise_for_status()
+                total_header = r.headers.get("Content-Range") or r.headers.get("Content-Length")
+                total = 0
+                if total_header and "/" in str(total_header):
+                    total = int(str(total_header).split("/")[-1].strip())
+                elif r.headers.get("Content-Length"):
+                    total = int(r.headers["Content-Length"]) + (start_byte if start_byte else 0)
+                total_mb = total / (1024 * 1024) if total else 0
+                downloaded = start_byte
+                chunk_size = 1024 * 1024  # 1MB chunks
+                mode = "ab" if start_byte else "wb"
+                with open(temp_path, mode) as f:
+                    for chunk in r.iter_bytes(chunk_size=chunk_size):
+                        f.write(chunk)
+                        downloaded += len(chunk)
+                        dl_mb = downloaded / (1024 * 1024)
+                        pct = int(downloaded * 100 / total) if total else 0
+                        msg = f"Downloading {filename} to {category}/\n"
+                        if total:
+                            msg += f"{dl_mb:.0f} / {total_mb:.0f} MB ({pct}%)"
+                        else:
+                            msg += f"{dl_mb:.0f} MB downloaded"
+                        with _state_lock:
+                            _comfyui_dl_status["output"] = msg
+                            _comfyui_dl_status["progress"] = pct
+        temp_path.rename(dest)
+        with _state_lock:
+            _comfyui_dl_status["success"] = True
+            _comfyui_dl_status["output"] += f"\nDone — saved to {category}/{filename}"
+    except Exception as e:
+        with _state_lock:
+            _comfyui_dl_status["output"] += f"\nError: {e}"
+            _comfyui_dl_status["success"] = False
+        if temp_path.exists():
+            try:
+                temp_path.unlink()
+            except OSError:
+                pass
+        if dest.exists() and not _comfyui_dl_status.get("success"):
+            try:
+                dest.unlink()
+            except OSError:
+                pass
+    finally:
+        with _state_lock:
+            _comfyui_dl_status["running"] = False
+            _comfyui_dl_status["done"] = True
+
+
+@app.post("/api/comfyui/download")
+async def comfyui_download(req: ComfyUIDownloadRequest):
+    """Download a ComfyUI model from a URL to the appropriate category folder."""
+    url = req.url.strip()
+    if not url or not url.startswith("https://"):
+        raise HTTPException(status_code=400, detail="URL must start with https://")
+    with _state_lock:
+        if _comfyui_dl_status.get("running"):
+            raise HTTPException(status_code=409, detail="A download is already in progress")
+    # Derive filename from URL if not provided
+    filename = req.filename.strip()
+    if not filename:
+        filename = url.split("/")[-1].split("?")[0]
+    if not filename or ".." in filename or "/" in filename or "\\" in filename:
+        raise HTTPException(status_code=400, detail="Invalid or undetectable filename")
+    # Derive category
+    category = req.category.strip()
+    if category and category not in COMFYUI_CATEGORIES:
+        raise HTTPException(status_code=400, detail=f"Invalid category. Must be one of: {COMFYUI_CATEGORIES}")
+    if not category:
+        category = _auto_detect_category(url, filename)
+    thread = threading.Thread(target=_run_comfyui_download, args=(url, category, filename))
+    thread.daemon = True
+    thread.start()
+    return {"status": "started", "category": category, "filename": filename}
+
+
+@app.get("/api/comfyui/download/status")
+async def comfyui_download_status():
+    """Get ComfyUI URL download progress."""
+    with _state_lock:
+        return dict(_comfyui_dl_status)
 
 
 # --- Services ---
@@ -442,8 +612,8 @@ def _read_mcp_registry() -> dict:
     if path and path.exists():
         try:
             return json.loads(path.read_text())
-        except (json.JSONDecodeError, OSError):
-            pass
+        except (json.JSONDecodeError, OSError) as e:
+            logger.warning("MCP registry read failed: %s", e)
     return {"servers": {}}
 
 
@@ -631,6 +801,39 @@ _last_benchmark: dict | None = None
 _service_usage: list[dict] = []
 _MAX_SERVICE_USAGE = 500
 
+DASHBOARD_DATA_PATH = Path(os.environ.get("DASHBOARD_DATA_PATH", "/tmp"))
+_THROUGHPUT_FILE = DASHBOARD_DATA_PATH / "throughput.json"
+
+
+def _load_throughput_state() -> None:
+    """Load throughput samples and last benchmark from disk (R4)."""
+    global _throughput_samples, _last_benchmark, _service_usage
+    if not _THROUGHPUT_FILE.exists():
+        return
+    try:
+        data = json.loads(_THROUGHPUT_FILE.read_text())
+        _throughput_samples = {k: v for k, v in (data.get("samples") or {}).items() if isinstance(v, list)}
+        _last_benchmark = data.get("last_benchmark") if isinstance(data.get("last_benchmark"), dict) else None
+        _service_usage = [u for u in (data.get("service_usage") or []) if isinstance(u, dict)][-_MAX_SERVICE_USAGE:]
+    except Exception as e:
+        logger.warning("Throughput state load failed: %s", e)
+
+
+def _save_throughput_state() -> None:
+    """Persist throughput state to disk."""
+    try:
+        _THROUGHPUT_FILE.parent.mkdir(parents=True, exist_ok=True)
+        _THROUGHPUT_FILE.write_text(json.dumps({
+            "samples": _throughput_samples,
+            "last_benchmark": _last_benchmark,
+            "service_usage": _service_usage[-_MAX_SERVICE_USAGE:],
+        }))
+    except Exception as e:
+        logger.warning("Throughput state save failed: %s", e)
+
+
+_load_throughput_state()
+
 
 def _percentile(sorted_arr: list[float], p: float) -> float:
     """Compute percentile (0–100). Returns 0 if empty."""
@@ -658,21 +861,23 @@ async def throughput_record(req: ThroughputRecordRequest):
     model = req.model.strip()
     if not model or req.output_tokens_per_sec <= 0:
         return {"ok": True}
-    if model not in _throughput_samples:
-        _throughput_samples[model] = []
-    _throughput_samples[model].append(req.output_tokens_per_sec)
-    if len(_throughput_samples[model]) > _MAX_SAMPLES_PER_MODEL:
-        _throughput_samples[model] = _throughput_samples[model][-_MAX_SAMPLES_PER_MODEL:]
-    # Service usage (which service is taxing which model)
-    service = (req.service or "unknown").strip()[:64]
-    _service_usage.append({
-        "model": model,
-        "service": service,
-        "tps": round(req.output_tokens_per_sec, 1),
-        "ts": time.time(),
-    })
-    if len(_service_usage) > _MAX_SERVICE_USAGE:
-        _service_usage[:] = _service_usage[-_MAX_SERVICE_USAGE:]
+    with _state_lock:
+        if model not in _throughput_samples:
+            _throughput_samples[model] = []
+        _throughput_samples[model].append(req.output_tokens_per_sec)
+        if len(_throughput_samples[model]) > _MAX_SAMPLES_PER_MODEL:
+            _throughput_samples[model] = _throughput_samples[model][-_MAX_SAMPLES_PER_MODEL:]
+        # Service usage (which service is taxing which model)
+        service = (req.service or "unknown").strip()[:64]
+        _service_usage.append({
+            "model": model,
+            "service": service,
+            "tps": round(req.output_tokens_per_sec, 1),
+            "ts": time.time(),
+        })
+        if len(_service_usage) > _MAX_SERVICE_USAGE:
+            _service_usage[:] = _service_usage[-_MAX_SERVICE_USAGE:]
+        _save_throughput_state()
     return {"ok": True}
 
 
@@ -681,7 +886,9 @@ async def throughput_service_usage():
     """Return recent service usage: which service used which model (from model gateway traffic)."""
     now = time.time()
     # Last 24h, grouped by model -> services
-    recent = [u for u in _service_usage if (now - u["ts"]) < 86400]
+    with _state_lock:
+        usage_snapshot = list(_service_usage)
+    recent = [u for u in usage_snapshot if (now - u["ts"]) < 86400]
     by_model: dict[str, list[dict]] = {}
     for u in recent:
         m = u["model"]
@@ -719,7 +926,10 @@ async def throughput_service_usage():
 async def throughput_stats():
     """Return per-model throughput stats: peak, p50, p95, p99, latest, sample_count. Includes last_benchmark if available."""
     result: dict[str, dict] = {}
-    for model, samples in list(_throughput_samples.items()):
+    with _state_lock:
+        snapshot = {m: list(s) for m, s in _throughput_samples.items()}
+        benchmark = dict(_last_benchmark) if _last_benchmark else None
+    for model, samples in snapshot.items():
         if not samples:
             continue
         sorted_s = sorted(samples)
@@ -732,17 +942,17 @@ async def throughput_stats():
             "sample_count": len(samples),
         }
     out: dict = {"models": result, "ok": True}
-    if _last_benchmark:
-        out["last_benchmark"] = _last_benchmark
+    if benchmark:
+        out["last_benchmark"] = benchmark
     return out
 
 
 @app.get("/api/ollama/ps")
 async def ollama_ps():
-    """List models currently loaded in Ollama (from /api/ps)."""
+    """List models currently loaded in Ollama (via model-gateway)."""
     async with AsyncClient(timeout=10.0) as client:
         try:
-            r = await client.get(f"{OLLAMA_URL.rstrip('/')}/api/ps")
+            r = await client.get(f"{MODEL_GATEWAY_URL.rstrip('/')}/api/ps")
             r.raise_for_status()
             return r.json()
         except Exception as e:
@@ -768,7 +978,7 @@ async def throughput_benchmark(req: ThroughputBenchmarkRequest):
             detail=f"Model '{model}' is an embedding model and does not support text generation. Choose an LLM (e.g. llama3.2, deepseek-r1:7b).",
         )
     prompt = "Say 'ok' and nothing else."
-    url = f"{OLLAMA_URL.rstrip('/')}/api/generate"
+    url = f"{MODEL_GATEWAY_URL.rstrip('/')}/api/generate"
     async with AsyncClient(timeout=60.0) as client:
         try:
             r = await client.post(url, json={"model": model, "prompt": prompt, "stream": False})
@@ -800,11 +1010,13 @@ async def throughput_benchmark(req: ThroughputBenchmarkRequest):
     input_tokens_per_sec = prompt_eval_count / prompt_eval_duration_sec if prompt_eval_duration_sec > 0 else 0
 
     # Store sample for stats (peak, percentiles)
-    if model not in _throughput_samples:
-        _throughput_samples[model] = []
-    _throughput_samples[model].append(output_tokens_per_sec)
-    if len(_throughput_samples[model]) > _MAX_SAMPLES_PER_MODEL:
-        _throughput_samples[model] = _throughput_samples[model][-_MAX_SAMPLES_PER_MODEL:]
+    with _state_lock:
+        if model not in _throughput_samples:
+            _throughput_samples[model] = []
+        _throughput_samples[model].append(output_tokens_per_sec)
+        if len(_throughput_samples[model]) > _MAX_SAMPLES_PER_MODEL:
+            _throughput_samples[model] = _throughput_samples[model][-_MAX_SAMPLES_PER_MODEL:]
+        _save_throughput_state()
 
     payload = {
         "ok": True,
@@ -818,7 +1030,9 @@ async def throughput_benchmark(req: ThroughputBenchmarkRequest):
         "total_duration_ms": round(total_duration_ns / 1e6, 1),
     }
     global _last_benchmark
-    _last_benchmark = payload
+    with _state_lock:
+        _last_benchmark = payload
+        _save_throughput_state()
     return payload
 
 
@@ -1097,14 +1311,15 @@ BASE_PATH_ENV = os.environ.get("BASE_PATH", "/")
 
 @app.get("/api/hardware")
 async def hardware_stats():
-    """System resource stats. No auth required (read-only)."""
-    cpu_pct = psutil.cpu_percent(interval=0.1)
-    mem = psutil.virtual_memory()
+    """System resource stats. No auth required (read-only). Blocking calls run in thread pool (R7)."""
+    cpu_pct = await asyncio.to_thread(psutil.cpu_percent, 0.1)
+    mem = await asyncio.to_thread(psutil.virtual_memory)
     try:
-        disk = psutil.disk_usage(BASE_PATH_ENV)
+        disk = await asyncio.to_thread(psutil.disk_usage, BASE_PATH_ENV)
         disk_used_gb = round(disk.used / 1e9, 1)
         disk_total_gb = round(disk.total / 1e9, 1)
-    except Exception:
+    except Exception as e:
+        logger.warning("Disk usage check failed for %s: %s", BASE_PATH_ENV, e)
         disk_used_gb = None
         disk_total_gb = None
 
@@ -1121,8 +1336,8 @@ async def hardware_stats():
             "vram_total_mb": mi.total // 1024 // 1024,
             "utilization_pct": ut.gpu,
         }
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("GPU stats unavailable: %s", e)
 
     return {
         "cpu_pct": cpu_pct,

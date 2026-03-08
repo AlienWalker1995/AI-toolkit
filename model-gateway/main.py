@@ -11,6 +11,7 @@ from typing import Any
 from fastapi import FastAPI, Request
 from fastapi.responses import StreamingResponse
 from httpx import AsyncClient
+from pydantic import BaseModel, Field
 
 app = FastAPI(title="Model Gateway", version="1.0.0")
 
@@ -32,6 +33,7 @@ OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://ollama:11434").rstrip("/")
 VLLM_URL = os.environ.get("VLLM_URL", "").rstrip("/")  # e.g. http://vllm:8000
 DEFAULT_PROVIDER = os.environ.get("DEFAULT_PROVIDER", "ollama")
 DASHBOARD_URL = os.environ.get("DASHBOARD_URL", "").rstrip("/")
+THROUGHPUT_RECORD_TOKEN = os.environ.get("THROUGHPUT_RECORD_TOKEN", "").strip()
 MODEL_CACHE_TTL = float(os.environ.get("MODEL_CACHE_TTL_SEC", "60"))
 # Context window cap. Ollama defaults to a model's max (often 128K+) which pre-allocates
 # a huge KV cache even for short prompts — severely hurting CPU throughput.
@@ -92,6 +94,9 @@ def _record_throughput(
 
     async def _post():
         try:
+            headers = {}
+            if THROUGHPUT_RECORD_TOKEN:
+                headers["X-Throughput-Token"] = THROUGHPUT_RECORD_TOKEN
             async with AsyncClient(timeout=5.0) as client:
                 await client.post(
                     f"{DASHBOARD_URL}/api/throughput/record",
@@ -100,6 +105,7 @@ def _record_throughput(
                         "output_tokens_per_sec": round(tps, 1),
                         "service": service or "unknown",
                     },
+                    headers=headers if headers else None,
                 )
         except Exception:
             pass
@@ -179,6 +185,63 @@ async def invalidate_cache():
     return {"ok": True, "message": "Model list cache invalidated"}
 
 
+# --- Ollama proxy (dashboard model ops — PRD Principle 4: route via gateway) ---
+
+
+@app.get("/api/tags")
+async def ollama_tags():
+    """Proxy Ollama /api/tags. Dashboard uses this instead of direct Ollama."""
+    async with AsyncClient(timeout=30.0) as client:
+        r = await client.get(f"{OLLAMA_URL}/api/tags")
+        r.raise_for_status()
+        return r.json()
+
+
+@app.get("/api/ps")
+async def ollama_ps():
+    """Proxy Ollama /api/ps (loaded models)."""
+    async with AsyncClient(timeout=10.0) as client:
+        r = await client.get(f"{OLLAMA_URL}/api/ps")
+        r.raise_for_status()
+        return r.json()
+
+
+@app.delete("/api/delete")
+async def ollama_delete(request: Request):
+    """Proxy Ollama /api/delete."""
+    body = await request.json()
+    async with AsyncClient(timeout=60.0) as client:
+        r = await client.request("DELETE", f"{OLLAMA_URL}/api/delete", json=body)
+        r.raise_for_status()
+        return r.json() if r.content else {"ok": True}
+
+
+@app.post("/api/pull")
+async def ollama_pull(request: Request):
+    """Proxy Ollama /api/pull (streaming)."""
+    body = await request.json()
+    async def stream():
+        async with AsyncClient(timeout=3600.0) as client:
+            async with client.stream("POST", f"{OLLAMA_URL}/api/pull", json=body) as resp:
+                async for chunk in resp.aiter_bytes():
+                    yield chunk
+    return StreamingResponse(
+        stream(),
+        media_type="application/x-ndjson",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@app.post("/api/generate")
+async def ollama_generate(request: Request):
+    """Proxy Ollama /api/generate (non-streaming)."""
+    body = await request.json()
+    async with AsyncClient(timeout=60.0) as client:
+        r = await client.post(f"{OLLAMA_URL}/api/generate", json=body)
+        r.raise_for_status()
+        return r.json()
+
+
 @app.get("/health")
 async def health():
     """Gateway health check. OK if at least one provider is reachable."""
@@ -214,14 +277,65 @@ def _ollama_to_openai_message(msg: dict) -> dict:
     return {"role": role, "content": text}
 
 
+class ChatMessage(BaseModel):
+    role: str
+    content: Any = ""
+    tool_call_id: str | None = None
+    tool_calls: list[dict[str, Any]] | None = None
+
+
+class ChatCompletionRequest(BaseModel):
+    model: str
+    messages: list[ChatMessage]
+    stream: bool = False
+    tools: list[dict[str, Any]] | None = None
+    tool_choice: Any = None
+    max_tokens: int | None = None
+    temperature: float | None = None
+    top_p: float | None = None
+    stop: Any = None
+
+
+class CompletionRequest(BaseModel):
+    model: str = ""
+    prompt: Any = ""
+    stream: bool = False
+    max_tokens: int | None = None
+    temperature: float | None = None
+    top_p: float | None = None
+    stop: Any = None
+
+
+class ResponsesRequest(BaseModel):
+    model: str = ""
+    input: Any = ""
+    instructions: str = ""
+    tools: list[dict[str, Any]] | None = None
+    tool_choice: Any = None
+    stream: bool = False
+    max_tokens: int | None = None
+    max_output_tokens: int | None = None
+    temperature: float | None = None
+    top_p: float | None = None
+    stop: Any = None
+
+
+class EmbeddingRequest(BaseModel):
+    model: str = ""
+    input: Any = ""
+
+
 def _stream_chunk_openai(obj: dict) -> str:
     """Format OpenAI SSE chunk."""
     return f"data: {json.dumps(obj)}\n\n"
 
 
 @app.post("/v1/chat/completions")
-async def chat_completions(request: Request, body: dict[str, Any]):
+async def chat_completions(request: Request, body: ChatCompletionRequest | dict[str, Any]):
     """Chat completion. Proxies to Ollama or vLLM based on model prefix."""
+    # Accept both Pydantic model (from HTTP) and dict (from internal calls)
+    if not isinstance(body, dict):
+        body = body.model_dump(exclude_none=True)
     model = body.get("model", "")
     provider, model_id = _model_provider_and_id(model)
     service = _service_from_headers(
@@ -255,6 +369,8 @@ async def chat_completions(request: Request, body: dict[str, Any]):
             media_type="text/event-stream",
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no", "X-Request-ID": req_id},
         )
+    else:
+        # vLLM non-streaming
         async with AsyncClient(timeout=600.0) as client:
             r = await client.post(
                 f"{VLLM_URL}/v1/chat/completions",
@@ -456,20 +572,21 @@ async def chat_completions(request: Request, body: dict[str, Any]):
 
 
 @app.post("/v1/completions")
-async def completions_compat(request: Request, body: dict[str, Any]):
+async def completions_compat(request: Request, body: CompletionRequest):
     """Legacy text completions — convert to chat format and proxy."""
-    logger.warning(">>> /v1/completions called (legacy); converting to chat format. model=%s", body.get("model", ""))
-    prompt = body.get("prompt", "")
+    logger.warning(">>> /v1/completions called (legacy); converting to chat format. model=%s", body.model)
+    prompt = body.prompt
     if isinstance(prompt, list):
         prompt = "\n".join(str(p) for p in prompt)
-    chat_body = {
-        "model": body.get("model", ""),
+    chat_body: dict[str, Any] = {
+        "model": body.model,
         "messages": [{"role": "user", "content": prompt}],
-        "stream": body.get("stream", False),
+        "stream": body.stream,
     }
     for k in ("max_tokens", "temperature", "top_p", "stop"):
-        if k in body:
-            chat_body[k] = body[k]
+        v = getattr(body, k, None)
+        if v is not None:
+            chat_body[k] = v
     return await chat_completions(request, chat_body)
 
 
@@ -477,12 +594,12 @@ async def completions_compat(request: Request, body: dict[str, Any]):
 
 
 @app.post("/v1/responses")
-async def responses_api(request: Request, body: dict[str, Any]):
+async def responses_api(request: Request, body: ResponsesRequest):
     """OpenAI Responses API — convert to chat completions and proxy, preserving tools."""
-    raw_tools = body.get("tools") or []
+    raw_tools = body.tools or []
 
     messages: list[dict] = []
-    instructions = body.get("instructions", "")
+    instructions = body.instructions
     if instructions:
         messages.append({"role": "system", "content": instructions})
 
@@ -503,7 +620,7 @@ async def responses_api(request: Request, body: dict[str, Any]):
     # Convert Responses API input items → chat messages.
     # Handles plain messages, function_call (→ assistant tool_calls), and
     # function_call_output (→ tool result message).
-    inp = body.get("input", "")
+    inp = body.input
     if isinstance(inp, str) and inp:
         messages.append({"role": "user", "content": inp})
     elif isinstance(inp, list):
@@ -574,21 +691,22 @@ async def responses_api(request: Request, body: dict[str, Any]):
                 })
         return result
 
-    stream = body.get("stream", False)
+    stream = body.stream
     chat_body: dict[str, Any] = {
-        "model": body.get("model", ""),
+        "model": body.model,
         "messages": messages,
         "stream": stream,
     }
     for k in ("max_tokens", "temperature", "top_p", "stop"):
-        if k in body:
-            chat_body[k] = body[k]
-    if body.get("max_output_tokens") and "max_tokens" not in chat_body:
-        chat_body["max_tokens"] = body["max_output_tokens"]
+        v = getattr(body, k, None)
+        if v is not None:
+            chat_body[k] = v
+    if body.max_output_tokens and "max_tokens" not in chat_body:
+        chat_body["max_tokens"] = body.max_output_tokens
     if raw_tools:
         chat_body["tools"] = _convert_tools(raw_tools)
-    if "tool_choice" in body:
-        chat_body["tool_choice"] = body["tool_choice"]
+    if body.tool_choice is not None:
+        chat_body["tool_choice"] = body.tool_choice
 
     chat_response = await chat_completions(request, chat_body)
 
@@ -597,7 +715,7 @@ async def responses_api(request: Request, body: dict[str, Any]):
             resp_id = f"resp-{uuid.uuid4().hex[:12]}"
             msg_item_id = f"msg-{uuid.uuid4().hex[:12]}"
             seq = 0
-            model = body.get("model", "")
+            model = body.model
 
             yield _stream_chunk_openai({
                 "type": "response.created",
@@ -793,7 +911,7 @@ async def responses_api(request: Request, body: dict[str, Any]):
         "id": resp_id,
         "object": "response",
         "created_at": int(time.time()),
-        "model": body.get("model", ""),
+        "model": body.model,
         "output": output_items,
         "usage": {
             "input_tokens": usage.get("prompt_tokens", 0),
@@ -808,11 +926,11 @@ async def responses_api(request: Request, body: dict[str, Any]):
 
 
 @app.post("/v1/embeddings")
-async def embeddings(body: dict[str, Any]):
+async def embeddings(body: EmbeddingRequest):
     """Embeddings. Proxies to Ollama or vLLM based on model prefix."""
-    model = body.get("model", "")
+    model = body.model
     provider, model_id = _model_provider_and_id(model)
-    inp = body.get("input", "")
+    inp = body.input
 
     if isinstance(inp, str):
         inp = [inp]
@@ -824,7 +942,7 @@ async def embeddings(body: dict[str, Any]):
         async with AsyncClient(timeout=120.0) as client:
             r = await client.post(
                 f"{VLLM_URL}/v1/embeddings",
-                json={**body, "model": model_id},
+                json={**body.model_dump(exclude_none=True), "model": model_id},
                 headers={"Content-Type": "application/json"},
             )
             r.raise_for_status()

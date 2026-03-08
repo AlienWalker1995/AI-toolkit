@@ -21,6 +21,7 @@ CHUNK_SIZE = int(os.environ.get("CHUNK_SIZE", "400"))
 CHUNK_OVERLAP = int(os.environ.get("CHUNK_OVERLAP", "50"))
 STATE_DIR = WATCH_DIR / ".rag-state"
 STATE_FILE = STATE_DIR / "processed.json"
+HEARTBEAT_FILE = Path("/tmp/rag-ingestion.heartbeat")
 
 SUPPORTED_EXTENSIONS = {".txt", ".md", ".py", ".js", ".ts", ".go", ".rs", ".java", ".pdf"}
 
@@ -247,9 +248,11 @@ def main() -> None:
     observer.schedule(handler, str(WATCH_DIR), recursive=True)
     observer.start()
     print("[info] Watching for changes …")
+    HEARTBEAT_FILE.touch()
     try:
         while True:
-            time.sleep(1)
+            time.sleep(10)
+            HEARTBEAT_FILE.touch()
     except KeyboardInterrupt:
         observer.stop()
     observer.join()
