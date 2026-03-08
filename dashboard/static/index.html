@@ -388,13 +388,8 @@
       gap: var(--space-2);
       min-width: 0;
     }
-    .service-card .row .service {
-      display: flex;
-      align-items: center;
-      gap: var(--space-2);
-      min-width: 0;
-      overflow: hidden;
-      flex: 1;
+    .service-card .row {
+      flex-wrap: wrap;
     }
     .service-card .row .service .label {
       overflow: hidden;
@@ -1520,19 +1515,19 @@
               ${escapeHtml(s.name)}
               ${s.port ? `<span class="service-port">:${s.port}</span>` : ''}
             </div>
+            <a href="${serviceUrl(host, s.port)}" target="_blank" rel="noopener" class="service" style="text-decoration:none;color:inherit;" aria-label="Open ${s.name} (opens in new tab)">
+              <span class="status ${s.ok ? 'ok' : 'fail'}" aria-hidden="true"></span>
+              <span class="label">${s.ok ? 'Running' : 'Offline'}</span>
+              <span class="external" aria-hidden="true">↗</span>
+            </a>
+            ${opsAvailable ? `
             <div class="row">
-              <a href="${serviceUrl(host, s.port)}" target="_blank" rel="noopener" class="service" style="flex:1;text-decoration:none;color:inherit;min-width:0;" aria-label="Open ${s.name} (opens in new tab)">
-                <span class="status ${s.ok ? 'ok' : 'fail'}" aria-hidden="true"></span>
-                <span class="label">${s.ok ? 'Running' : 'Offline'}</span>
-                <span class="external" aria-hidden="true">↗</span>
-              </a>
-              ${opsAvailable ? `
-                <button type="button" class="btn-icon btn-ops-start" data-service-id="${escapeHtml(s.id)}" title="Start" aria-label="Start ${s.name}">▶</button>
-                <button type="button" class="btn-icon btn-ops-stop" data-service-id="${escapeHtml(s.id)}" title="Stop" aria-label="Stop ${s.name}">⏹</button>
-                <button type="button" class="btn-icon btn-ops-restart" data-service-id="${escapeHtml(s.id)}" title="Restart" aria-label="Restart ${s.name}">↻</button>
-                <button type="button" class="btn-icon btn-ops-logs" data-service-id="${escapeHtml(s.id)}" title="View logs" aria-label="View logs for ${s.name}">📋</button>
-              ` : ''}
+              <button type="button" class="btn-icon btn-ops-start" data-service-id="${escapeHtml(s.id)}" title="Start" aria-label="Start ${s.name}">▶</button>
+              <button type="button" class="btn-icon btn-ops-stop" data-service-id="${escapeHtml(s.id)}" title="Stop" aria-label="Stop ${s.name}">⏹</button>
+              <button type="button" class="btn-icon btn-ops-restart" data-service-id="${escapeHtml(s.id)}" title="Restart" aria-label="Restart ${s.name}">↻</button>
+              <button type="button" class="btn-icon btn-ops-logs" data-service-id="${escapeHtml(s.id)}" title="View logs" aria-label="View logs for ${s.name}">📋</button>
             </div>
+            ` : ''}
             ${!s.ok && s.hint ? `<div class="hint">${s.hint}</div>` : ''}
           </div>
         `).join('');
