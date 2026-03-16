@@ -19,73 +19,88 @@ OpenAI-compatible proxy for unified model access. Routes chat and embedding requ
 | `OLLAMA_URL` | Upstream Ollama URL (default: `http://ollama:11434`) |
 | `VLLM_URL` | Optional vLLM backend URL |
 | `DEFAULT_PROVIDER` | Default provider when no prefix (default: `ollama`) |
-| `CLAUDE_CODE_LOCAL_MODEL` | Local model for Claude Code (e.g. `glm-4.7-flash:Q4_K_M`) |
+| `CLAUDE_CODE_LOCAL_MODEL` | Default local model for Claude Code `claude-*` remapping (e.g. `glm-4.7-flash:Q4_K_M`) |
 | `OLLAMA_NUM_CTX` | KV cache context cap (default: `16384`, `0` = model max) |
 | `MODEL_CACHE_TTL_SEC` | Model list cache TTL (default: `60`) |
 
 ## Claude Code with local models
 
-The gateway translates Anthropic's Messages API to Ollama, allowing Claude Code to run against any local model.
+Run Claude Code against any Ollama model via the gateway's Anthropic Messages API translation.
 
 ### Setup
 
-1. Set the local model in `.env`:
-   ```
-   CLAUDE_CODE_LOCAL_MODEL=glm-4.7-flash:Q4_K_M
-   ```
+Add to your shell profile (`~/.bashrc`, `~/.zshrc`, or PowerShell `$PROFILE`):
 
-2. Restart the gateway:
-   ```bash
-   docker compose up -d model-gateway
-   ```
-
-### Usage (same machine)
+```bash
+# Bash / Zsh — add to ~/.bashrc or ~/.zshrc
+export ANTHROPIC_AUTH_TOKEN="ollama"
+export ANTHROPIC_API_KEY="ollama"
+export ANTHROPIC_BASE_URL="http://localhost:11435"
+```
 
 ```powershell
-# PowerShell
-$env:ANTHROPIC_BASE_URL="http://localhost:11435"
-$env:ANTHROPIC_API_KEY="local"
-claude
+# PowerShell — add to $PROFILE
+$env:ANTHROPIC_AUTH_TOKEN = "ollama"
+$env:ANTHROPIC_API_KEY = "ollama"
+$env:ANTHROPIC_BASE_URL = "http://localhost:11435"
+```
+
+Then reload your shell:
+
+```bash
+source ~/.bashrc   # or source ~/.zshrc
+```
+
+### Usage — specify the model directly
+
+```bash
+claude --model devstral-small-2
+claude --model glm-4.7-flash:Q4_K_M
+claude --model qwen3:8b
+```
+
+Any Ollama model name works — the gateway passes it through to Ollama as-is.
+
+### Usage — use the default model
+
+If `CLAUDE_CODE_LOCAL_MODEL` is set in `.env`, you can just run `claude` without `--model`. Claude Code sends a `claude-*` model name by default, and the gateway remaps it to the configured local model.
+
+```bash
+# .env
+CLAUDE_CODE_LOCAL_MODEL=glm-4.7-flash:Q4_K_M
 ```
 
 ```bash
-# Bash
-ANTHROPIC_BASE_URL=http://localhost:11435 ANTHROPIC_API_KEY=local claude
+# Then just:
+claude
 ```
 
-### Usage (remote machine)
+### Remote machine
 
 Point Claude Code at the machine running the gateway:
 
-```powershell
-# PowerShell
-$env:ANTHROPIC_BASE_URL="http://<gateway-host-ip>:11435"
-$env:ANTHROPIC_API_KEY="local"
-claude
-```
-
 ```bash
-# Bash
-ANTHROPIC_BASE_URL=http://<gateway-host-ip>:11435 ANTHROPIC_API_KEY=local claude
+export ANTHROPIC_BASE_URL="http://<gateway-host-ip>:11435"
+export ANTHROPIC_API_KEY="ollama"
+claude --model devstral-small-2
 ```
 
 Replace `<gateway-host-ip>` with the IP or hostname of the machine running the AI toolkit. Port `11435` must be reachable (check firewall).
 
 ### How it works
 
-1. Claude Code sends requests to `/v1/messages` using a `claude-*` model name
-2. The gateway remaps `claude-*` → the model set in `CLAUDE_CODE_LOCAL_MODEL`
-3. The request is translated from Anthropic format to Ollama's `/api/chat`
-4. The response is translated back to Anthropic format
+1. Claude Code sends requests to `/v1/messages` (Anthropic Messages API)
+2. If the model name is `claude-*`, the gateway remaps it to `CLAUDE_CODE_LOCAL_MODEL`
+3. Otherwise, the model name passes through as-is (e.g. `devstral-small-2`)
+4. The request is translated from Anthropic format to Ollama's `/api/chat`
+5. The response is translated back to Anthropic format
 
 Claude Code doesn't know it's talking to a local model — the gateway is a transparent proxy.
 
-### Changing the local model
+### Changing the default model
 
 Edit `CLAUDE_CODE_LOCAL_MODEL` in `.env` and restart:
 
 ```bash
 docker compose up -d model-gateway
 ```
-
-Any Ollama model works: `qwen3:8b`, `deepseek-r1:7b`, `devstral-small-2`, etc.
