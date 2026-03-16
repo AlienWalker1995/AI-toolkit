@@ -328,7 +328,9 @@ services:
     restart: unless-stopped
     depends_on:
       comfyui-mcp-image:
+        # Build-only container; failure here means ComfyUI MCP won't work but other MCPs should still start
         condition: service_completed_successfully
+        required: false
     environment:
       - MCP_CONFIG_FILE=/mcp-config/servers.txt
       - MCP_GATEWAY_PORT=8811
@@ -345,7 +347,8 @@ services:
       - ${DATA_PATH:-${BASE_PATH:-.}/data}/mcp:/mcp-config
     # No host port by default (backend-only per PRD M6). For external MCP access: -f overrides/mcp-expose.yml
     healthcheck:
-      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:8811/mcp"]
+      # MCP endpoint requires POST+Accept headers; just verify the port is accepting connections.
+      test: ["CMD-SHELL", "nc -z localhost 8811"]
       interval: 30s
       timeout: 10s
       retries: 3
