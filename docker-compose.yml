@@ -145,6 +145,7 @@ services:
       - MODEL_GATEWAY_URL=http://model-gateway:11435
       - OPENCLAW_CONFIG_PATH=/openclaw-config/openclaw.json
       - OPENCLAW_GATEWAY_TOKEN=${OPENCLAW_GATEWAY_TOKEN:-}
+      - OPENCLAW_UI_PORT=${OPENCLAW_UI_PORT:-6668}
       - DASHBOARD_DATA_PATH=/data/dashboard
     volumes:
       - ${BASE_PATH:-.}/models/comfyui:/models
@@ -422,15 +423,16 @@ services:
       - ${OPENCLAW_CONFIG_DIR:-${BASE_PATH:-.}/data/openclaw}:/home/node/.openclaw
       - ${OPENCLAW_WORKSPACE_DIR:-${BASE_PATH:-.}/data/openclaw/workspace}:/home/node/.openclaw/workspace
     ports:
-      - "${OPENCLAW_GATEWAY_PORT:-18789}:18789"
-      - "${OPENCLAW_BRIDGE_PORT:-18790}:18790"
-      - "${OPENCLAW_UI_PORT:-18791}:18791"
+      - "${OPENCLAW_GATEWAY_PORT:-6666}:${OPENCLAW_GATEWAY_PORT:-6666}"
+      - "${OPENCLAW_BRIDGE_PORT:-6667}:${OPENCLAW_BRIDGE_PORT:-6667}"
+      - "${OPENCLAW_UI_PORT:-6668}:${OPENCLAW_UI_PORT:-6668}"
     stdin_open: true
     tty: true
     init: true
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:18789"]
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:${OPENCLAW_GATEWAY_PORT:-6666}"]
+      # OpenClaw binds to OPENCLAW_GATEWAY_PORT internally
       start_period: 60s
       interval: 30s
       timeout: 10s

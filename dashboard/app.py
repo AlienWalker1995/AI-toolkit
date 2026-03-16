@@ -293,7 +293,7 @@ async def ollama_pull_status():
 
 def _scan_comfyui_models() -> list[dict]:
     """Scan ComfyUI models directory for installed files."""
-    subdirs = ("checkpoints", "loras", "text_encoders", "latent_upscale_models", "vae")
+    subdirs = ("checkpoints", "unet", "loras", "text_encoders", "latent_upscale_models", "vae")
     models = []
     for sub in subdirs:
         d = MODELS_DIR / sub
@@ -312,7 +312,7 @@ def _scan_comfyui_models() -> list[dict]:
     return sorted(models, key=lambda m: (m["category"], m["name"]))
 
 
-def _run_comfyui_pull():
+def _run_comfyui_pull(packs: str | None = None):
     """Run ComfyUI model pull script in background."""
     global _comfyui_status
     with _state_lock:
@@ -321,6 +321,8 @@ def _run_comfyui_pull():
     env = os.environ.copy()
     env["MODELS_DIR"] = str(MODELS_DIR)
     env["PYTHONUNBUFFERED"] = "1"
+    if packs:
+        env["COMFYUI_PACKS"] = packs
     try:
         proc = subprocess.Popen(
             ["python3", "-u", str(script)],
@@ -349,7 +351,7 @@ def _run_comfyui_pull():
             _comfyui_status["done"] = True
 
 
-COMFYUI_CATEGORIES = ("checkpoints", "loras", "text_encoders", "latent_upscale_models", "vae")
+COMFYUI_CATEGORIES = ("checkpoints", "unet", "loras", "text_encoders", "latent_upscale_models", "vae")
 
 
 @app.delete("/api/comfyui/models/{category}/{filename:path}")
@@ -381,14 +383,34 @@ async def comfyui_models():
         return {"models": [], "ok": False, "error": str(e)}
 
 
+@app.get("/api/comfyui/packs")
+async def comfyui_packs():
+    """List available ComfyUI model packs from models.json."""
+    config_path = SCRIPTS_DIR / "comfyui" / "models.json"
+    if not config_path.exists():
+        return {"packs": {}, "defaults": [], "ok": False, "error": "models.json not found"}
+    try:
+        import json as _json
+        config = _json.loads(config_path.read_text(encoding="utf-8"))
+        packs = {}
+        for name, pack in config.get("packs", {}).items():
+            packs[name] = {
+                "description": pack.get("description", ""),
+                "model_count": len(pack.get("models", [])),
+            }
+        return {"packs": packs, "defaults": config.get("defaults", {}).get("packs", []), "ok": True}
+    except Exception as e:
+        return {"packs": {}, "defaults": [], "ok": False, "error": str(e)}
+
+
 @app.post("/api/comfyui/pull")
-async def comfyui_pull():
-    """Start ComfyUI model pull (LTX-2) in background."""
+async def comfyui_pull(packs: str | None = None):
+    """Start ComfyUI model pull in background. Optional 'packs' query param (comma-separated pack names)."""
     global _comfyui_status
     with _state_lock:
         if _comfyui_status.get("running"):
             raise HTTPException(status_code=409, detail="Pull already in progress")
-    thread = threading.Thread(target=_run_comfyui_pull)
+    thread = threading.Thread(target=_run_comfyui_pull, args=(packs,))
     thread.daemon = True
     thread.start()
     return {"status": "started", "message": "ComfyUI model pull started. Poll /api/comfyui/pull/status for progress."}
@@ -503,9 +525,9 @@ SERVICES = [
      "hint": "ComfyUI uses auto-detected compute (NVIDIA/AMD/Intel/CPU). Run ./compose up -d. Pull LTX-2 via dashboard."},
     {"id": "n8n", "name": "N8N", "port": 5678, "url": "http://localhost:5678", "check": "http://n8n:5678",
      "hint": "Check: docker compose logs n8n"},
-    {"id": "openclaw", "name": "OpenClaw", "port": 18789,
-     "url": f"http://localhost:18789/?token={os.environ.get('OPENCLAW_GATEWAY_TOKEN', '')}" if os.environ.get("OPENCLAW_GATEWAY_TOKEN") else "http://localhost:18789",
-     "check": "http://host.docker.internal:18789/",
+    {"id": "openclaw", "name": "OpenClaw", "port": int(os.environ.get("OPENCLAW_UI_PORT", 6668)),
+     "url": f"http://localhost:{os.environ.get('OPENCLAW_UI_PORT', 6668)}/?token={os.environ.get('OPENCLAW_GATEWAY_TOKEN', '')}" if os.environ.get("OPENCLAW_GATEWAY_TOKEN") else f"http://localhost:{os.environ.get('OPENCLAW_UI_PORT', 6668)}",
+     "check": f"http://host.docker.internal:{os.environ.get('OPENCLAW_UI_PORT', 6668)}/",
      "hint": "Run ensure_dirs.ps1 (Windows) or ensure_dirs.sh (Linux/Mac) to ensure .env has OPENCLAW_GATEWAY_TOKEN. Check: docker compose logs openclaw-gateway"},
     {"id": "qdrant", "name": "Qdrant", "port": 6333, "url": "http://localhost:6333",
      "check": "http://qdrant:6333/readyz",

@@ -1,0 +1,94 @@
+{
+  "_comment": "ComfyUI model packs. Select packs via COMFYUI_PACKS env var (comma-separated). Default packs listed in defaults.packs. {quant} replaced by COMFYUI_QUANT (default: Q4_K_M).",
+  "packs": {
+    "ltx-2.3-fp8": {
+      "description": "LTX-2.3 22B dev — fp8 safetensors checkpoint (29 GB)",
+      "models": [
+        {
+          "repo": "Lightricks/LTX-2.3-fp8",
+          "file": "ltx-2.3-22b-dev-fp8.safetensors",
+          "dest": "checkpoints"
+        }
+      ]
+    },
+    "ltx-2.3-gguf": {
+      "description": "LTX-2.3 22B dev — GGUF quantized (for ComfyUI GGUF loader nodes)",
+      "models": [
+        {
+          "repo": "unsloth/LTX-2.3-GGUF",
+          "file": "ltx-2.3-22b-dev-{quant}.gguf",
+          "dest": "unet"
+        },
+        {
+          "repo": "unsloth/LTX-2.3-GGUF",
+          "file": "vae/ltx-2.3-22b-dev_video_vae.safetensors",
+          "dest": "vae"
+        },
+        {
+          "repo": "unsloth/LTX-2.3-GGUF",
+          "file": "vae/ltx-2.3-22b-dev_audio_vae.safetensors",
+          "dest": "vae"
+        },
+        {
+          "repo": "unsloth/LTX-2.3-GGUF",
+          "file": "text_encoders/ltx-2.3-22b-dev_embeddings_connectors.safetensors",
+          "dest": "text_encoders"
+        }
+      ]
+    },
+    "ltx-2.3-extras": {
+      "description": "LTX-2.3 extras — distilled LoRA + spatial upscaler",
+      "models": [
+        {
+          "repo": "Lightricks/LTX-2.3",
+          "file": "ltx-2.3-22b-distilled-lora-384.safetensors",
+          "dest": "loras"
+        },
+        {
+          "repo": "Lightricks/LTX-2.3",
+          "file": "ltx-2.3-spatial-upscaler-x2-1.0.safetensors",
+          "dest": "latent_upscale_models"
+        }
+      ]
+    },
+    "gemma-3-text-encoder-fp4": {
+      "description": "Gemma 3 12B text encoder — fp4 mixed quantized (9.5 GB, from Comfy-Org)",
+      "models": [
+        {
+          "repo": "Comfy-Org/ltx-2",
+          "file": "split_files/text_encoders/gemma_3_12B_it_fp4_mixed.safetensors",
+          "dest": "text_encoders"
+        }
+      ]
+    },
+    "gemma-3-text-encoder-gguf": {
+      "description": "Gemma 3 12B text encoder — GGUF quantized (for GGUF workflows)",
+      "models": [
+        {
+          "repo": "unsloth/gemma-3-12b-it-qat-GGUF",
+          "file": "gemma-3-12b-it-qat-UD-Q4_K_XL.gguf",
+          "dest": "text_encoders"
+        },
+        {
+          "repo": "unsloth/gemma-3-12b-it-qat-GGUF",
+          "file": "mmproj-BF16.gguf",
+          "dest": "text_encoders"
+        }
+      ]
+    },
+    "gemma-3-abliterated-lora": {
+      "description": "Gemma 3 12B abliterated LoRA — uncensored text encoder addon (628 MB)",
+      "models": [
+        {
+          "repo": "Comfy-Org/ltx-2",
+          "file": "split_files/loras/gemma-3-12b-it-abliterated_lora_rank64_bf16.safetensors",
+          "dest": "loras"
+        }
+      ]
+    }
+  },
+  "defaults": {
+    "packs": ["ltx-2.3-fp8", "ltx-2.3-extras", "gemma-3-text-encoder-fp4", "gemma-3-abliterated-lora"],
+    "quant": "Q4_K_M"
+  }
+}

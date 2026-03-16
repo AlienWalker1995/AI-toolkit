@@ -96,7 +96,7 @@ def _service_from_headers(origin: str | None, x_service: str | None) -> str:
         return "n8n"
     if ":8080" in o and "dashboard" not in o:
         return "dashboard"
-    if "openclaw" in o or ":18789" in o or ":18790" in o:
+    if "openclaw" in o or ":6666" in o or ":6667" in o or ":18789" in o or ":18790" in o:
         return "openclaw"
     # Fallback: host:port
     try:
@@ -197,6 +197,17 @@ async def list_models():
                             })
         except Exception:
             pass
+
+    # When CLAUDE_CODE_LOCAL_MODEL is set, advertise claude-* model names so
+    # Claude Code's model validation passes before the request is remapped.
+    if CLAUDE_CODE_LOCAL_MODEL and objects:
+        for alias in ("claude-sonnet-4-5-20250514", "claude-sonnet-4-6-20250725"):
+            objects.append({
+                "id": alias,
+                "object": "model",
+                "created": 0,
+                "owned_by": f"local:{CLAUDE_CODE_LOCAL_MODEL}",
+            })
 
     if objects:
         _model_cache = objects

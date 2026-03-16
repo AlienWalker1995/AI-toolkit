@@ -1,49 +1,26 @@
 #!/usr/bin/env python3
-"""Download LTX-2.3 models for ComfyUI from Hugging Face.
+"""Config-driven ComfyUI model downloader.
 
-Uses symlinks to the HF cache to avoid duplicating large files on disk.
-Based on: https://huggingface.co/unsloth/LTX-2.3-GGUF
+Reads model packs from models.json (next to this script) and downloads them
+from HuggingFace Hub, using symlinks to the HF cache to avoid duplication.
 
-Model choices:
-  Q4_K_M — good quality/size balance (~12 GB for main model).
-  Override with COMFYUI_QUANT env var (e.g. Q8_0 for near-lossless).
+Environment variables:
+  MODELS_DIR        Target ComfyUI models root (default: /models)
+  COMFYUI_PACKS     Comma-separated pack names to download (default: from models.json defaults)
+  COMFYUI_QUANT     GGUF quantization level for {quant} templates (default: Q4_K_M)
+  COMFYUI_CONFIG    Path to models.json override (default: <script_dir>/models.json)
 """
+import json
 import os
 import sys
+from pathlib import Path
 
-MODELS_DIR = os.environ.get("MODELS_DIR", "/models")
+SCRIPT_DIR = Path(__file__).resolve().parent
+MODELS_DIR = Path(os.environ.get("MODELS_DIR", "/models"))
 QUANT = os.environ.get("COMFYUI_QUANT", "Q4_K_M")
+CONFIG_PATH = Path(os.environ.get("COMFYUI_CONFIG", SCRIPT_DIR / "models.json"))
 
-# (repo_id, filename_template, dest_subdir, [dest_name])
-# {quant} is replaced with COMFYUI_QUANT env var.
-DOWNLOADS = [
-    # --- LTX-2.3 dev model (main unet/diffusion model) ---
-    ("unsloth/LTX-2.3-GGUF", "ltx-2.3-22b-dev-{quant}.gguf", "unet", None),
-
-    # --- VAE ---
-    ("unsloth/LTX-2.3-GGUF", "vae/ltx-2.3-22b-dev_video_vae.safetensors", "vae", None),
-    ("unsloth/LTX-2.3-GGUF", "vae/ltx-2.3-22b-dev_audio_vae.safetensors", "vae", None),
-
-    # --- Embeddings connector ---
-    ("unsloth/LTX-2.3-GGUF", "text_encoders/ltx-2.3-22b-dev_embeddings_connectors.safetensors",
-     "text_encoders", None),
-
-    # --- Distilled LoRA (fast draft/preview generation) ---
-    ("Lightricks/LTX-2.3", "ltx-2.3-22b-distilled-lora-384.safetensors", "loras", None),
-
-    # --- Spatial upscaler (2x) ---
-    ("Lightricks/LTX-2.3", "ltx-2.3-spatial-upscaler-x2-1.0.safetensors",
-     "latent_upscale_models", None),
-
-    # --- Gemma 3 12B text encoder (QAT quantized, ~8 GB) ---
-    ("unsloth/gemma-3-12b-it-qat-GGUF", "gemma-3-12b-it-qat-UD-Q4_K_XL.gguf",
-     "text_encoders", None),
-
-    # --- Gemma 3 multimodal projector ---
-    ("unsloth/gemma-3-12b-it-qat-GGUF", "mmproj-BF16.gguf", "text_encoders", None),
-]
-
-SUBDIRS = ("unet", "checkpoints", "text_encoders", "loras", "latent_upscale_models", "vae")
+ALL_SUBDIRS = ("unet", "checkpoints", "text_encoders", "loras", "latent_upscale_models", "vae")
 
 
 def ensure_huggingface_hub():
@@ -56,52 +33,93 @@ def ensure_huggingface_hub():
         print("huggingface_hub installed.", flush=True)
 
 
-def download(repo_id, filename, subdir, dest_name=None):
+def load_config():
+    if not CONFIG_PATH.exists():
+        print(f"ERROR: Config not found: {CONFIG_PATH}", flush=True)
+        sys.exit(1)
+    with open(CONFIG_PATH, encoding="utf-8") as f:
+        return json.load(f)
+
+
+def resolve_packs(config):
+    """Determine which packs to download."""
+    packs_env = os.environ.get("COMFYUI_PACKS", "").strip()
+    if packs_env:
+        requested = [p.strip() for p in packs_env.split(",") if p.strip()]
+        if requested == ["all"]:
+            return list(config["packs"].keys())
+        unknown = [p for p in requested if p not in config["packs"]]
+        if unknown:
+            available = ", ".join(config["packs"].keys())
+            print(f"ERROR: Unknown packs: {', '.join(unknown)}", flush=True)
+            print(f"Available: {available}", flush=True)
+            sys.exit(1)
+        return requested
+    return config.get("defaults", {}).get("packs", list(config["packs"].keys()))
+
+
+def download_model(repo_id, filename, subdir, dest_name=None):
     from huggingface_hub import hf_hub_download
 
-    # Resolve quant placeholder
     filename = filename.format(quant=QUANT)
     dest_name = dest_name or os.path.basename(filename)
-    dest_path = os.path.join(MODELS_DIR, subdir, dest_name)
+    dest_dir = MODELS_DIR / subdir
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    dest_path = dest_dir / dest_name
 
-    if os.path.exists(dest_path):
-        print(f"==> OK (exists): {subdir}/{dest_name}", flush=True)
+    if dest_path.exists():
+        print(f"  OK (exists): {subdir}/{dest_name}", flush=True)
         return True
 
-    print(f"==> Downloading: {dest_name} (from {repo_id})", flush=True)
+    print(f"  Downloading: {dest_name} (from {repo_id})", flush=True)
     try:
         cached = hf_hub_download(repo_id=repo_id, filename=filename)
-        # Symlink to HF cache to avoid duplicating large files on disk.
-        # Fall back to copy if symlinks aren't supported (e.g. some Windows/network mounts).
         try:
             os.symlink(cached, dest_path)
-            print(f"==> Linked: {subdir}/{dest_name}", flush=True)
+            print(f"  Linked: {subdir}/{dest_name}", flush=True)
         except OSError:
             import shutil
             shutil.copy2(cached, dest_path)
-            print(f"==> Copied: {subdir}/{dest_name}", flush=True)
+            print(f"  Copied: {subdir}/{dest_name}", flush=True)
         return True
     except Exception as e:
-        print(f"ERROR: {dest_name}: {e}", flush=True)
+        print(f"  ERROR: {dest_name}: {e}", flush=True)
         return False
 
 
 def main():
-    print(f"Setting up model directories (quant={QUANT})...", flush=True)
-    for sub in SUBDIRS:
-        os.makedirs(os.path.join(MODELS_DIR, sub), exist_ok=True)
+    config = load_config()
+    quant = os.environ.get("COMFYUI_QUANT") or config.get("defaults", {}).get("quant", "Q4_K_M")
+    global QUANT
+    QUANT = quant
+
+    pack_names = resolve_packs(config)
+    packs = config["packs"]
+
+    # Collect all models to download
+    models = []
+    for pack_name in pack_names:
+        pack = packs[pack_name]
+        for m in pack["models"]:
+            models.append((pack_name, m))
+
+    print(f"Packs: {', '.join(pack_names)} ({len(models)} models, quant={QUANT})", flush=True)
+    print(f"Target: {MODELS_DIR}", flush=True)
+
+    # Ensure subdirectories
+    for sub in ALL_SUBDIRS:
+        (MODELS_DIR / sub).mkdir(parents=True, exist_ok=True)
 
     ensure_huggingface_hub()
 
-    total = len(DOWNLOADS)
     ok = True
-    for i, (repo_id, filename, subdir, dest_name) in enumerate(DOWNLOADS, 1):
-        print(f"--- [{i}/{total}] ---", flush=True)
-        if not download(repo_id, filename, subdir, dest_name):
+    for i, (pack_name, m) in enumerate(models, 1):
+        print(f"[{i}/{len(models)}] {pack_name}:", flush=True)
+        if not download_model(m["repo"], m["file"], m["dest"], m.get("name")):
             ok = False
 
     if ok:
-        print("All LTX-2.3 ComfyUI models ready.", flush=True)
+        print(f"All {len(models)} ComfyUI models ready.", flush=True)
     else:
         print("Some downloads failed. Re-run to retry.", flush=True)
     return 0 if ok else 1
