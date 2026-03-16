@@ -1271,7 +1271,7 @@
           </div>
           <div class="pull-area">
             <div class="pull-row">
-              <button id="comfyui-pull">Pull LTX-2 models (~60 GB)</button>
+              <button id="comfyui-pull">Pull LTX-2.3 models (~80 GB)</button>
             </div>
             <div id="comfyui-progress" class="progress-area" style="display:none;" role="region" aria-label="ComfyUI pull progress">
               <div class="log" id="comfyui-log" role="log" aria-live="polite"></div>
@@ -1909,7 +1909,7 @@
         const r = await api('/api/comfyui/models');
         const d = await r.json();
         if (!d.ok || !d.models?.length) {
-          el.innerHTML = '<div class="empty">No ComfyUI models.<span class="hint">Click Pull LTX-2 models to download (~60 GB).</span></div>';
+          el.innerHTML = '<div class="empty">No ComfyUI models.<span class="hint">Click Pull LTX-2.3 models to download (~80 GB).</span></div>';
           return;
         }
         const byCat = {};
@@ -2013,39 +2013,26 @@
       logEl.textContent = `Pulling ${name}...`;
       barEl.style.width = '0%';
       barEl.setAttribute('aria-valuenow', 0);
-      const r = await fetch('/api/ollama/pull', {
+      await api('/api/ollama/pull', {
         method: 'POST',
-        cache: 'no-store',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ model: name })
       });
-      const reader = r.body.getReader();
-      const dec = new TextDecoder();
-      let buf = '', out = '';
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buf += dec.decode(value, { stream: true });
-        const lines = buf.split('\n');
-        buf = lines.pop() || '';
-        for (const line of lines) {
-          if (!line.trim()) continue;
-          try {
-            const j = JSON.parse(line);
-            if (j.status) out += j.status + '\n';
-            if (j.completed != null && j.total && j.total > 0) {
-              const pct = Math.round((j.completed / j.total) * 100);
-              barEl.style.width = pct + '%';
-              barEl.setAttribute('aria-valuenow', pct);
-            }
-          } catch (_) {}
-        }
-        logEl.textContent = out || 'Pulling...';
-        logEl.scrollTop = logEl.scrollHeight;
-      }
-      barEl.style.width = '100%';
-      barEl.setAttribute('aria-valuenow', 100);
-      logEl.textContent += '\n✓ Done.';
+      await pollOllamaPull(logEl, barEl);
+    }
+
+    function pollOllamaPull(logEl, barEl) {
+      return new Promise((resolve) => {
+        const poll = () => {
+          api('/api/ollama/pull/status').then(r => r.json()).then(s => {
+            if (s.output) { logEl.textContent = s.output; logEl.scrollTop = logEl.scrollHeight; }
+            if (s.pct != null) { barEl.style.width = s.pct + '%'; barEl.setAttribute('aria-valuenow', s.pct); }
+            if (s.running) { setTimeout(poll, 1500); }
+            else { barEl.style.width = '100%'; barEl.setAttribute('aria-valuenow', 100); resolve(s); }
+          }).catch(() => setTimeout(poll, 2000));
+        };
+        poll();
+      });
     }
 
     document.getElementById('ollama-starter-pack').onclick = async () => {
@@ -2113,7 +2100,7 @@
             if (s.running) setTimeout(poll, 1500);
             else {
               logEl.textContent += '\n' + (s.success ? '✓ Done.' : '✗ Failed.');
-              toast(s.success ? 'LTX-2 models ready' : 'Download failed', s.success ? 'success' : 'error');
+              toast(s.success ? 'LTX-2.3 models ready' : 'Download failed', s.success ? 'success' : 'error');
               btn.disabled = false;
               loadComfyuiModels();
             }
@@ -2531,13 +2518,62 @@
       } catch (e) { /* silently skip if not available */ }
     }
 
+    async function resumeActivePulls() {
+      // ComfyUI — resume polling if a pull is in progress
+      try {
+        const s = await api('/api/comfyui/pull/status').then(r => r.json());
+        if (s.running) {
+          const btn = document.getElementById('comfyui-pull');
+          const prog = document.getElementById('comfyui-progress');
+          const logEl = document.getElementById('comfyui-log');
+          btn.disabled = true;
+          prog.style.display = 'block';
+          const poll = () => api('/api/comfyui/pull/status').then(r => r.json()).then(s => {
+            logEl.textContent = s.output || 'Preparing...';
+            logEl.scrollTop = logEl.scrollHeight;
+            if (s.running) setTimeout(poll, 1500);
+            else {
+              logEl.textContent += '\n' + (s.success ? '✓ Done.' : '✗ Failed.');
+              toast(s.success ? 'LTX-2.3 models ready' : 'Download failed', s.success ? 'success' : 'error');
+              btn.disabled = false;
+              loadComfyuiModels();
+            }
+          });
+          poll();
+        }
+      } catch (_) {}
+
+      // Ollama — resume polling if a pull is in progress
+      try {
+        const s = await api('/api/ollama/pull/status').then(r => r.json());
+        if (s.running) {
+          const prog = document.getElementById('ollama-progress');
+          const logEl = document.getElementById('ollama-log');
+          const barEl = document.getElementById('ollama-progress-bar');
+          const pullBtn = document.getElementById('ollama-pull');
+          const packBtn = document.getElementById('ollama-starter-pack');
+          prog.style.display = 'block';
+          pullBtn.disabled = true;
+          packBtn.disabled = true;
+          logEl.textContent = `Resuming pull: ${s.model || ''}...`;
+          pollOllamaPull(logEl, barEl).then(result => {
+            toast(result.success ? `Pulled ${s.model}` : 'Pull failed', result.success ? 'success' : 'error');
+            pullBtn.disabled = false;
+            packBtn.disabled = false;
+            loadOllamaModels();
+          });
+        }
+      } catch (_) {}
+    }
+
     (async function init() {
       await loadAuthConfig();
       if (authConfig.auth_required && authConfig.auth_type === 'bearer' && !sessionStorage.getItem(AUTH_STORAGE_KEY)) {
         showAuthModal();
-        window.addEventListener('auth-ready', () => { loadOllamaLibrary().then(() => refresh()); }, { once: true });
+        window.addEventListener('auth-ready', () => { loadOllamaLibrary().then(() => refresh()); resumeActivePulls(); }, { once: true });
       } else {
         loadOllamaLibrary().then(() => refresh());
+        resumeActivePulls();
       }
       setInterval(refresh, 15000);
       refreshHardware();

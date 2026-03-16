@@ -48,12 +48,13 @@ _model_cache_ts: float = 0.0
 
 
 def _model_provider_and_id(name: str) -> tuple[str, str]:
-    """Return (provider, model_id). Provider: ollama, vllm. Model ID is unprefixed."""
-    if "/" in name:
-        prefix, rest = name.split("/", 1)
-        if prefix.lower() == "vllm" and VLLM_URL:
-            return ("vllm", rest)
-        return ("ollama", rest)
+    """Return (provider, model_id). Provider: ollama, vllm.
+    Only 'vllm/' and 'ollama/' are treated as explicit provider prefixes.
+    HF-style paths (hf.co/org/model, org/model) are passed through as-is."""
+    if name.startswith("vllm/") and VLLM_URL:
+        return ("vllm", name[5:])
+    if name.startswith("ollama/"):
+        return ("ollama", name[7:])
     return (DEFAULT_PROVIDER, name)
 
 

@@ -89,4 +89,26 @@ if [[ -f "$base/scripts/ssrf-egress-block.sh" ]] && command -v iptables >/dev/nu
   echo "Note: After first 'docker compose up', run: sudo ./scripts/ssrf-egress-block.sh (blocks SSRF from MCP)"
 fi
 
+# Configure Claude Code to route through the local model-gateway
+if command -v claude >/dev/null 2>&1; then
+  port="${MODEL_GATEWAY_PORT:-11435}"
+  configured=false
+  for rc in "$HOME/.bashrc" "$HOME/.zshrc"; do
+    if [[ -f "$rc" ]] && ! grep -q 'ANTHROPIC_BASE_URL' "$rc"; then
+      printf '\n# Claude Code — local model-gateway\nexport ANTHROPIC_API_KEY=local\nexport ANTHROPIC_BASE_URL=http://localhost:%s\n' "$port" >> "$rc"
+      configured=true
+    fi
+  done
+  if [[ "$configured" == "true" ]]; then
+    echo "OK Claude Code configured -> http://localhost:$port (run: source ~/.bashrc)"
+  else
+    echo "OK Claude Code already configured in shell rc"
+  fi
+  echo "   Usage: claude --model <ollama-model-name>"
+else
+  echo "Note: Claude Code not installed. To install:"
+  echo "        npm install -g @anthropic-ai/claude-code"
+  echo "      Then re-run this script to configure it automatically."
+fi
+
 echo "Directories ready."

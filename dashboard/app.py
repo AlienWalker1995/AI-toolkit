@@ -114,8 +114,9 @@ OLLAMA_LIBRARY_FALLBACK = [
     "mistral", "nomic-embed-text", "phi4", "gemma3",
 ]
 
-# Background ComfyUI pull status
+# Background pull status dicts
 _comfyui_status: dict = {"running": False, "output": "", "done": False, "success": None}
+_ollama_pull_status: dict = {"running": False, "model": "", "output": "", "pct": 0, "done": False, "success": None}
 
 
 
@@ -219,24 +220,72 @@ async def ollama_delete(req: PullRequest):
             raise HTTPException(status_code=502, detail=f"Ollama request failed: {e}")
 
 
-@app.post("/api/ollama/pull")
-async def ollama_pull(req: PullRequest):
-    """Stream Ollama model pull progress (via model-gateway)."""
-    async def stream():
-        async with AsyncClient(timeout=3600.0) as client:
-            async with client.stream(
+def _run_ollama_pull(model: str):
+    """Pull an Ollama model in background, tracking progress in _ollama_pull_status."""
+    global _ollama_pull_status
+    import json as _json
+    with _state_lock:
+        _ollama_pull_status = {"running": True, "model": model, "output": "", "pct": 0, "done": False, "success": None}
+    try:
+        import httpx as _httpx
+        out_lines = []
+        with _httpx.Client(timeout=3600.0) as client:
+            with client.stream(
                 "POST",
                 f"{MODEL_GATEWAY_URL}/api/pull",
-                json={"model": req.model, "stream": True},
+                json={"model": model, "stream": True},
             ) as response:
-                async for chunk in response.aiter_bytes():
-                    yield chunk
+                buf = ""
+                for chunk in response.iter_text():
+                    buf += chunk
+                    lines = buf.split("\n")
+                    buf = lines.pop()
+                    for line in lines:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            j = _json.loads(line)
+                            if j.get("status"):
+                                out_lines.append(j["status"])
+                            pct = 0
+                            if j.get("total") and j.get("completed") is not None:
+                                pct = int((j["completed"] / j["total"]) * 100)
+                            with _state_lock:
+                                _ollama_pull_status["output"] = "\n".join(out_lines[-200:])
+                                _ollama_pull_status["pct"] = pct
+                        except Exception:
+                            pass
+        with _state_lock:
+            _ollama_pull_status["success"] = True
+    except Exception as e:
+        logger.error("Ollama pull failed: %s", e)
+        with _state_lock:
+            _ollama_pull_status["output"] += f"\nError: {e}"
+            _ollama_pull_status["success"] = False
+    finally:
+        with _state_lock:
+            _ollama_pull_status["running"] = False
+            _ollama_pull_status["done"] = True
 
-    return StreamingResponse(
-        stream(),
-        media_type="application/x-ndjson",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-    )
+
+@app.post("/api/ollama/pull")
+async def ollama_pull(req: PullRequest):
+    """Start Ollama model pull in background. Poll /api/ollama/pull/status for progress."""
+    global _ollama_pull_status
+    with _state_lock:
+        if _ollama_pull_status.get("running"):
+            raise HTTPException(status_code=409, detail="Pull already in progress")
+    thread = threading.Thread(target=_run_ollama_pull, args=(req.model,), daemon=True)
+    thread.start()
+    return {"status": "started", "model": req.model}
+
+
+@app.get("/api/ollama/pull/status")
+async def ollama_pull_status():
+    """Get Ollama pull progress."""
+    with _state_lock:
+        return dict(_ollama_pull_status)
 
 
 # --- ComfyUI ---
@@ -244,7 +293,7 @@ async def ollama_pull(req: PullRequest):
 
 def _scan_comfyui_models() -> list[dict]:
     """Scan ComfyUI models directory for installed files."""
-    subdirs = ("checkpoints", "loras", "text_encoders", "latent_upscale_models")
+    subdirs = ("checkpoints", "loras", "text_encoders", "latent_upscale_models", "vae")
     models = []
     for sub in subdirs:
         d = MODELS_DIR / sub
@@ -271,9 +320,10 @@ def _run_comfyui_pull():
     script = SCRIPTS_DIR / "comfyui" / "pull_comfyui_models.py"
     env = os.environ.copy()
     env["MODELS_DIR"] = str(MODELS_DIR)
+    env["PYTHONUNBUFFERED"] = "1"
     try:
         proc = subprocess.Popen(
-            ["python3", str(script)],
+            ["python3", "-u", str(script)],
             env=env,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
@@ -299,12 +349,12 @@ def _run_comfyui_pull():
             _comfyui_status["done"] = True
 
 
-COMFYUI_CATEGORIES = ("checkpoints", "loras", "text_encoders", "latent_upscale_models")
+COMFYUI_CATEGORIES = ("checkpoints", "loras", "text_encoders", "latent_upscale_models", "vae")
 
 
 @app.delete("/api/comfyui/models/{category}/{filename:path}")
 async def comfyui_delete(category: str, filename: str):
-    """Delete a ComfyUI model file. category: checkpoints, loras, text_encoders, latent_upscale_models."""
+    """Delete a ComfyUI model file. category: checkpoints, loras, text_encoders, latent_upscale_models, vae."""
     if category not in COMFYUI_CATEGORIES:
         raise HTTPException(status_code=400, detail=f"Invalid category. Must be one of: {COMFYUI_CATEGORIES}")
     if not filename or ".." in filename or "/" in filename or "\\" in filename:
@@ -453,7 +503,7 @@ SERVICES = [
      "hint": "ComfyUI uses auto-detected compute (NVIDIA/AMD/Intel/CPU). Run ./compose up -d. Pull LTX-2 via dashboard."},
     {"id": "n8n", "name": "N8N", "port": 5678, "url": "http://localhost:5678", "check": "http://n8n:5678",
      "hint": "Check: docker compose logs n8n"},
-    {"id": "openclaw", "name": "OpenClaw", "port": 18789, "url": "http://localhost:18789",
+    {"id": "openclaw", "name": "OpenClaw", "port": 18791, "url": "http://localhost:18791",
      "check": "http://host.docker.internal:18789/",
      "hint": "Run ensure_dirs.ps1 (Windows) or ensure_dirs.sh (Linux/Mac) to ensure .env has OPENCLAW_GATEWAY_TOKEN. Check: docker compose logs openclaw-gateway"},
     {"id": "qdrant", "name": "Qdrant", "port": 6333, "url": "http://localhost:6333",

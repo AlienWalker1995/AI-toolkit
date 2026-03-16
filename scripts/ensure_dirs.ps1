@@ -70,4 +70,17 @@ if (Test-Path $detectScript) {
     if ($LASTEXITCODE -eq 0) { Write-Host "OK Hardware detected (overrides/compute.yml)" }
 }
 
+# Configure Claude Code to route through the local model-gateway
+if (Get-Command claude -ErrorAction SilentlyContinue) {
+    $port = if ($env:MODEL_GATEWAY_PORT) { $env:MODEL_GATEWAY_PORT } else { "11435" }
+    [System.Environment]::SetEnvironmentVariable("ANTHROPIC_API_KEY", "local", "User")
+    [System.Environment]::SetEnvironmentVariable("ANTHROPIC_BASE_URL", "http://localhost:$port", "User")
+    Write-Host "OK Claude Code configured -> http://localhost:$port (restart terminal to apply)"
+    Write-Host "   Usage: claude --model <ollama-model-name>"
+} else {
+    Write-Host "Note: Claude Code not installed. To install:"
+    Write-Host "        npm install -g @anthropic-ai/claude-code"
+    Write-Host "      Then re-run this script to configure it automatically."
+}
+
 Write-Host "Directories ready."

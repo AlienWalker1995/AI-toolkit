@@ -119,7 +119,6 @@ services:
     build: ./dashboard
     restart: unless-stopped
     user: "1000:1000"
-    read_only: true
     tmpfs:
       - /tmp
     cap_drop: [ALL]
@@ -132,7 +131,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 256M
+          memory: 2G
     extra_hosts:
       - "host.docker.internal:host-gateway"
     healthcheck:
@@ -157,12 +156,13 @@ services:
       - DASHBOARD_AUTH_TOKEN=${DASHBOARD_AUTH_TOKEN:-}
       - DASHBOARD_PASSWORD=${DASHBOARD_PASSWORD:-}
       - THROUGHPUT_RECORD_TOKEN=${THROUGHPUT_RECORD_TOKEN:-}
+      - HF_TOKEN=${HF_TOKEN:-}
       # OpenClaw model management: dashboard reads/writes openclaw.json to sync models
       - MODEL_GATEWAY_URL=http://model-gateway:11435
       - OPENCLAW_CONFIG_PATH=/openclaw-config/openclaw.json
       - DASHBOARD_DATA_PATH=/data/dashboard
     volumes:
-      - ${BASE_PATH:-.}/models/comfyui:/models:ro
+      - ${BASE_PATH:-.}/models/comfyui:/models
       - ${BASE_PATH:-.}/scripts:/scripts:ro
       - ${DATA_PATH:-${BASE_PATH:-.}/data}/dashboard:/data/dashboard
       - ${DATA_PATH:-${BASE_PATH:-.}/data}/mcp:/mcp-config
@@ -449,12 +449,14 @@ services:
       NODE_ENV: production
       OPENCLAW_SKIP_SERVICE_CHECK: "true"
       OPENCLAW_GATEWAY_BIND: "lan"
+      DISCORD_BOT_TOKEN: ${DISCORD_TOKEN:-}
     volumes:
       - ${OPENCLAW_CONFIG_DIR:-${BASE_PATH:-.}/data/openclaw}:/home/node/.openclaw
       - ${OPENCLAW_WORKSPACE_DIR:-${BASE_PATH:-.}/data/openclaw/workspace}:/home/node/.openclaw/workspace
     ports:
       - "${OPENCLAW_GATEWAY_PORT:-18789}:18789"
       - "${OPENCLAW_BRIDGE_PORT:-18790}:18790"
+      - "${OPENCLAW_UI_PORT:-18791}:18791"
     stdin_open: true
     tty: true
     init: true
