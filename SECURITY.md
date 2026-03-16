@@ -39,10 +39,11 @@ Services bind to `0.0.0.0` to allow access from other machines on your network. 
 - **Never commit** `.env` or `mcp/.env`. They are gitignored.
 - Use `.env.example` as a template; copy to `.env` and fill in values locally.
 - API keys (OpenAI, Anthropic, etc.) and tokens should only live in `.env` files, never in the repository.
+- **Never commit** `data/` — it is gitignored and contains user-specific config (OpenClaw gateway token, Discord guild/user IDs, session data, etc.). All secrets and setup-specific values belong in `data/` or `.env`, not in shared code.
 
 ### Data
 
-All runtime data is stored under `BASE_PATH/data/` via bind mounts. Ensure appropriate filesystem permissions and backups.
+All runtime data is stored under `BASE_PATH/data/` via bind mounts. Ensure appropriate filesystem permissions and backups. The `data/` directory is gitignored and must remain untracked.
 
 ## Pre-deployment checklist
 

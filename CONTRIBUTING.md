@@ -1,34 +1,15 @@
-# Contributing to AI-toolkit
+# Contributing
 
-Thank you for your interest in contributing.
+Thanks for contributing to AI-toolkit.
 
-## How to Contribute
+## What not to commit
 
-1. **Fork** the repository
-2. **Create a branch** for your change (`git checkout -b feature/your-feature`)
-3. **Make your changes**
-4. **Submit a pull request** against `main`
+This repo is public. **Never commit**:
 
-## Security Notes for Contributors
+- **`.env`** — contains API keys, tokens, paths. Use `.env.example` as a template.
+- **`data/`** — contains user-specific config (OpenClaw gateway token, Discord guild/user IDs, session data, MCP config). Gitignored.
+- **`models/`** — model files. Gitignored.
+- **`overrides/compute.yml`** — hardware-specific. Gitignored.
+- **`mcp/.env`** — MCP API keys. Gitignored.
 
-- **Never commit secrets.** Do not add `.env`, API keys, tokens, or credentials to the repository.
-- Use `.env.example` as the template with placeholder values only.
-- If you need to test with real credentials, use local `.env` files (gitignored) and never push them.
-
-## What We Accept
-
-- Bug fixes
-- Documentation improvements
-- New profiles or service configurations
-- Script improvements (ensure_dirs, model pullers)
-- Security-related fixes
-
-## Code Style
-
-- PowerShell scripts: follow existing patterns
-- Python: PEP 8 style
-- YAML: 2-space indent, consistent structure
-
-## Questions
-
-Open an issue for questions or discussions.
+Shared code should use placeholders (e.g. `YOUR_GUILD_ID`, `BASE_PATH=.`) or read from environment variables. See [SECURITY.md](SECURITY.md) for details.
