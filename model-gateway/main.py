@@ -493,7 +493,80 @@ async def _chat_completions_impl(request: Request, body: dict[str, Any]):
 
     # Ollama: strip provider prefix (ollama/qwen2.5:7b -> qwen2.5:7b)
     ollama_model = _ollama_model_id_with_hf_fallback(model_id)
-    ollama_body: dict[str, Any] = {"model": ollama_model, "messages": messages, "stream": stream}
+
+    def _normalize_for_ollama(msgs: list[dict]) -> list[dict]:
+        """Normalize OpenAI-format messages to Ollama-compatible format.
+
+        Key differences:
+        - OpenAI tool_calls.function.arguments is a JSON *string*; Ollama expects a *dict*.
+        - OpenAI content can be a list of parts; Ollama expects a plain string.
+        - assistant messages with only tool_calls may have content=null; Ollama wants content="".
+        """
+        out = []
+        for m in msgs:
+            role = m.get("role", "")
+            content = m.get("content")
+
+            # Flatten list content → string
+            if isinstance(content, list):
+                parts = []
+                for p in content:
+                    if isinstance(p, dict):
+                        # text part
+                        if p.get("type") in ("text", "output_text") and "text" in p:
+                            parts.append(str(p["text"]))
+                        # tool_result part (Anthropic-style user message)
+                        elif p.get("type") == "tool_result":
+                            inner = p.get("content", "")
+                            if isinstance(inner, list):
+                                inner = "".join(
+                                    x.get("text", "") if isinstance(x, dict) else str(x)
+                                    for x in inner
+                                )
+                            parts.append(str(inner))
+                        else:
+                            # Fallback: any string-like value in the part
+                            for k in ("text", "content", "value"):
+                                if k in p:
+                                    parts.append(str(p[k]))
+                                    break
+                    elif isinstance(p, str):
+                        parts.append(p)
+                content = "\n".join(parts)
+
+            # Null content → empty string (Ollama rejects null)
+            if content is None:
+                content = ""
+
+            msg_out: dict[str, Any] = {"role": role, "content": content}
+
+            # Carry over tool_call_id for tool-result messages
+            if "tool_call_id" in m:
+                msg_out["tool_call_id"] = m["tool_call_id"]
+
+            # Normalize tool_calls: OpenAI sends arguments as a JSON string; Ollama needs a dict
+            raw_tcs = m.get("tool_calls")
+            if raw_tcs:
+                normalized_tcs = []
+                for tc in raw_tcs:
+                    func = (tc.get("function") or {})
+                    args = func.get("arguments", {})
+                    if isinstance(args, str):
+                        try:
+                            args = json.loads(args)
+                        except (json.JSONDecodeError, ValueError):
+                            args = {}
+                    normalized_tcs.append({
+                        "id": tc.get("id", f"call_{uuid.uuid4().hex[:12]}"),
+                        "type": "function",
+                        "function": {"name": func.get("name", ""), "arguments": args},
+                    })
+                msg_out["tool_calls"] = normalized_tcs
+
+            out.append(msg_out)
+        return out
+
+    ollama_body: dict[str, Any] = {"model": ollama_model, "messages": _normalize_for_ollama(messages), "stream": stream}
     # Forward tools — Ollama's /api/chat accepts the same OpenAI tools format
     if body.get("tools"):
         ollama_body["tools"] = body["tools"]
