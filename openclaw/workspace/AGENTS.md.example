@@ -42,7 +42,7 @@ Commonly enabled tools (via `gateway__call` with `tool: "server__toolname"` — 
 - **Playwright (browser)** — `gateway__call` with `tool: "playwright__browser_navigate"`, `tool: "playwright__browser_snapshot"`, etc.
 - **gateway__n8n_*** — n8n workflows. Use `gateway__call` with `tool: "n8n__workflow_list"`, etc. Needs `N8N_API_KEY`.
 - **comfyui__*** — Image/audio/video. Use `comfyui__call` with `tool: "list_models"`, `tool: "generate_image"`, etc., or `gateway__call` with `tool: "comfyui__list_models"`.
-  **Custom workflows:** save ComfyUI **API-format** JSON as `/comfyui-workflows/<id>.json` (host `data/comfyui-workflows/`) — not under workspace only; see full `AGENTS.md` in the repo template.
+  **Custom workflows (you do the full pipeline):** OpenClaw should **author, save, run, and fetch outputs** via MCP — not ask the user to wire ComfyUI by hand. Save **API-format** JSON as `/comfyui-workflows/<id>.json` (host `data/comfyui-workflows/`), then `list_workflows` / `run_workflow`; not under workspace-only paths. See full `AGENTS.md` in the repo template.
   To generate video with LTX-2.3: read `ltx_t2v.json` from the workspace, substitute `PARAM_*` values
   (PARAM_PROMPT, PARAM_NEGATIVE_PROMPT, PARAM_INT_SEED, PARAM_INT_FRAMES, PARAM_INT_WIDTH, PARAM_INT_HEIGHT),
   then POST `{"prompt": <workflow_json>}` to `http://comfyui:8188/prompt`. Poll `GET /history/{prompt_id}`
