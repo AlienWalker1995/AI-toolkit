@@ -7,9 +7,12 @@ RUN useradd -m -u 1000 appuser
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY app.py .
-COPY static/ static/
+# app.py imports dashboard.* — copy package tree and expose it on PYTHONPATH
+COPY __init__.py settings.py routes_hub.py services_catalog.py app.py ./dashboard/
+COPY static ./dashboard/static/
+
+ENV PYTHONPATH=/app
 
 EXPOSE 8080
 USER appuser
-CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8080"]
+CMD ["uvicorn", "dashboard.app:app", "--host", "0.0.0.0", "--port", "8080"]
