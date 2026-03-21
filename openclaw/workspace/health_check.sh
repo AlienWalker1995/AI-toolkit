@@ -1,7 +1,7 @@
 #!/bin/sh
 # health_check.sh — run from inside openclaw container to check all stack services
 # Usage: sh /home/node/.openclaw/workspace/health_check.sh
-# Requires: DASHBOARD_URL and DASHBOARD_AUTH_TOKEN env vars
+# Requires: DASHBOARD_URL; optional DASHBOARD_AUTH_TOKEN if dashboard auth is enabled
 
 set -e
 
@@ -9,19 +9,29 @@ DASHBOARD_URL="${DASHBOARD_URL:-http://dashboard:8080}"
 AUTH="${DASHBOARD_AUTH_TOKEN:-}"
 
 if [ -z "$AUTH" ]; then
-  echo "WARNING: DASHBOARD_AUTH_TOKEN not set — health check may return 401"
+  echo "NOTE: DASHBOARD_AUTH_TOKEN not set — using unauthenticated /api/health (OK if dashboard has no Bearer requirement)"
 fi
 
-echo "=== Stack Health ==="
-HEALTH=$(wget -q -O - --header="Authorization: Bearer $AUTH" "$DASHBOARD_URL/api/health" 2>&1) || {
-  echo "FAIL: Could not reach dashboard at $DASHBOARD_URL"
-  exit 1
-}
-echo "$HEALTH" | grep -o '"[^"]*":"[^"]*"' | grep -E '"status"' | head -20
+echo "=== Stack Health (GET /api/health) ==="
+if [ -n "$AUTH" ]; then
+  HEALTH=$(wget -q -O - --header="Authorization: Bearer $AUTH" "$DASHBOARD_URL/api/health" 2>&1) || {
+    echo "FAIL: Could not reach dashboard at $DASHBOARD_URL"
+    exit 1
+  }
+else
+  HEALTH=$(wget -q -O - "$DASHBOARD_URL/api/health" 2>&1) || {
+    echo "FAIL: Could not reach dashboard at $DASHBOARD_URL"
+    exit 1
+  }
+fi
+echo "$HEALTH"
 echo ""
 
-echo "=== Unhealthy Services ==="
-echo "$HEALTH" | grep -v '"healthy"' | grep '"status"' | head -10 || echo "(none)"
+if echo "$HEALTH" | grep -q '"ok":false'; then
+  echo "WARNING: At least one service reported ok:false (see JSON above)."
+else
+  echo "All reported service checks are ok:true."
+fi
 echo ""
 
 echo "=== ComfyUI Models ==="

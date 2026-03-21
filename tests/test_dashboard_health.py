@@ -16,7 +16,7 @@ def client(monkeypatch):
     async def _stub_check(url: str):
         return (True, "")
 
-    monkeypatch.setattr(dashboard_app, "_check_service", _stub_check)
+    monkeypatch.setattr("dashboard.services_catalog._check_service", _stub_check)
     return TestClient(dashboard_app.app)
 
 

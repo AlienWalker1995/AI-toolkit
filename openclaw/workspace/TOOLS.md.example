@@ -11,7 +11,8 @@ Environment-specific notes for this AI-toolkit install.
 | **Model Gateway** | `http://model-gateway:11435/v1` | All LLM calls (OpenAI-compatible) |
 | **Ollama** | `http://ollama:11434` | Direct Ollama API (prefer gateway) |
 | **MCP Gateway** | `http://mcp-gateway:8811/mcp` | MCP tools (search, fetch, GitHub, etc.) |
-| **Dashboard** | `http://localhost:8080` | Manage models, services, MCP tools |
+| **OpenClaw gateway (Control UI)** | `http://openclaw-gateway:6680` (from host: `http://localhost:6680/?token=…`) | Web UI and gateway WebSocket — **not** `:6682` (that is the browser/CDP bridge only) |
+| **Dashboard** | `http://dashboard:8080` (from host: `http://localhost:8080`) | Manage models, services, MCP tools |
 | **Qdrant** | `http://qdrant:6333` | Vector DB (RAG documents) |
 
 ## MCP tools

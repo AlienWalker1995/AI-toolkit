@@ -7,7 +7,7 @@ You run as the **Controller** in the AI-toolkit OpenClaw setup. You hold credent
 1. Read `SOUL.md` — who you are and how you behave
 2. Read `USER.md` if it exists — who you're helping and their preferences
 3. Read `memory/` files (today + recent) — what happened before
-4. Check service health: `wget -q -O - --header='Authorization: Bearer '"$DASHBOARD_AUTH_TOKEN" $DASHBOARD_URL/api/health 2>/dev/null` — if any service shows `"status": "unhealthy"`, tell the user at the start of the session
+4. Check service health: `wget -q -O - $DASHBOARD_URL/api/health` (add `--header='Authorization: Bearer '"$DASHBOARD_AUTH_TOKEN"` if the dashboard requires auth). The JSON has top-level `"ok"` and a `"services"` array; each item has `"id"`, `"ok"` (boolean), and `"error"` when unreachable. If any service has `"ok": false`, tell the user at the start of the session
 5. Update the Models section of TOOLS.md: `wget -q -O - $MODEL_GATEWAY_URL/v1/models 2>/dev/null` — parse the model list and rewrite the Models section with what's actually available
 6. If the session involves image generation: `comfyui__call` with `tool: "list_models"` — if no usable image checkpoint is present, proactively re-pull `flux1-schnell-fp8.safetensors` before the user hits an error
 
@@ -45,7 +45,7 @@ When any tool or service fails, work through these layers before reporting to th
    ```bash
    wget -q -O - --header='Authorization: Bearer '"$DASHBOARD_AUTH_TOKEN" $DASHBOARD_URL/api/health
    ```
-   Look for `"status": "unhealthy"`. For ComfyUI specifically: `wget -q -O - http://comfyui:8188/system_stats`
+   Parse JSON: any entry in `services` with `"ok": false` is down or unreachable. For ComfyUI specifically: `wget -q -O - http://comfyui:8188/system_stats`
 
 3. **Retry once** after confirming the service is healthy
 
@@ -70,7 +70,7 @@ Commonly enabled tools (via gateway__call with correct tool names):
 - **comfyui__*** — Image/audio/video. Use `comfyui__call` with `tool: "list_models"`, `tool: "generate_image"`, etc., or `gateway__call` with `tool: "comfyui__list_models"`.
   - **Important:** You run in a different container than ComfyUI. You cannot run `docker` or `docker compose` via exec — the container has no Docker. To add models, use the dashboard API (Option B). **Dashboard API:** Use `exec` to POST to the dashboard:
     - **URL:** Use `$DASHBOARD_URL` (http://dashboard:8080). NEVER use localhost:8080 — from inside the container, localhost is the container itself; the dashboard is at `dashboard:8080`.
-    - **Auth (REQUIRED):** The dashboard requires Bearer token auth. You MUST include `--header='Authorization: Bearer '"$DASHBOARD_AUTH_TOKEN"` or you get 401/exit 6. The env vars are available in the exec shell.
+    - **Auth:** If `DASHBOARD_AUTH_TOKEN` is set on the dashboard, protected `/api/*` routes require a Bearer header or you get 401. If it is unset, those routes are open. `/api/health` is always unauthenticated.
     - Start download (wget): `wget -q -O - --post-data='{"url":"https://huggingface.co/.../resolve/main/model.safetensors","category":"checkpoints","filename":"model.safetensors"}' --header='Content-Type: application/json' --header='Authorization: Bearer '"$DASHBOARD_AUTH_TOKEN" $DASHBOARD_URL/api/models/download`
     - Start download (curl): `curl -s -X POST -H 'Content-Type: application/json' -H 'Authorization: Bearer '"$DASHBOARD_AUTH_TOKEN"' -d '{"url":"...","category":"checkpoints","filename":"..."}' $DASHBOARD_URL/api/models/download`
     - Poll status: `wget -q -O - --header='Authorization: Bearer '"$DASHBOARD_AUTH_TOKEN" $DASHBOARD_URL/api/models/download/status`

@@ -25,11 +25,12 @@ from fastapi.staticfiles import StaticFiles
 from httpx import AsyncClient
 from pydantic import BaseModel
 
-from dashboard.services_catalog import OPS_SERVICE_MAP, SERVICES, _check_service
+from dashboard.routes_hub import router as hub_router
+from dashboard.services_catalog import OPS_SERVICE_MAP
+from dashboard.settings import AUTH_REQUIRED as _AUTH_REQUIRED
+from dashboard.settings import DASHBOARD_AUTH_TOKEN, OPENCLAW_CONFIG_PATH
 
-# Dashboard auth (optional bearer token only)
-DASHBOARD_AUTH_TOKEN = os.environ.get("DASHBOARD_AUTH_TOKEN", "").strip()
-_AUTH_REQUIRED = bool(DASHBOARD_AUTH_TOKEN)
+# Dashboard auth (optional bearer token only; see dashboard.settings)
 
 
 @asynccontextmanager
@@ -43,6 +44,7 @@ async def _lifespan(_app: FastAPI):
 
 
 app = FastAPI(title="AI-toolkit Dashboard", version="1.0.0", lifespan=_lifespan)
+app.include_router(hub_router)
 
 
 def _verify_auth(request: Request) -> bool:
@@ -94,8 +96,6 @@ async def auth_middleware(request: Request, call_next):
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://ollama:11434")
 MODEL_GATEWAY_URL = os.environ.get("MODEL_GATEWAY_URL", "http://model-gateway:11435").rstrip("/")
 COMFYUI_URL = os.environ.get("COMFYUI_URL", "http://comfyui:8188").rstrip("/")
-OPENCLAW_CONFIG_PATH = Path(os.environ.get("OPENCLAW_CONFIG_PATH", "/openclaw-config/openclaw.json"))
-OPENCLAW_GATEWAY_TOKEN = os.environ.get("OPENCLAW_GATEWAY_TOKEN", "")
 MODELS_DIR = Path(os.environ.get("MODELS_DIR", "/models"))
 SCRIPTS_DIR = Path(os.environ.get("SCRIPTS_DIR", "/scripts"))
 
@@ -907,40 +907,6 @@ async def mcp_remove(req: McpRemoveRequest):
         raise HTTPException(status_code=400, detail="Cannot remove last server. Add another first.")
     _write_mcp_servers(servers)
     return {"status": "removed", "servers": servers}
-
-
-@app.get("/api/services")
-async def services():
-    """Service links and live health status."""
-    results = []
-    for svc in SERVICES:
-        ok, err = await _check_service(svc["check"]) if svc.get("check") else (None, "")
-        results.append({
-            **{k: v for k, v in svc.items() if k != "check"},
-            "ok": ok,
-            "error": err if not ok else None,
-            "hint": svc.get("hint", ""),
-        })
-    return {"services": results}
-
-
-@app.get("/api/auth/config")
-async def auth_config():
-    """Return auth config for frontend. No auth required."""
-    if not _AUTH_REQUIRED:
-        return {"auth_required": False, "auth_type": None}
-    return {"auth_required": True, "auth_type": "bearer"}
-
-
-@app.get("/api/health")
-async def health():
-    """Aggregated platform health. Returns ok=true when all services are reachable."""
-    results = []
-    for svc in SERVICES:
-        ok, err = await _check_service(svc["check"]) if svc.get("check") else (None, "")
-        results.append({"id": svc["id"], "ok": ok, "error": err})
-    all_ok = all(r["ok"] for r in results if r["ok"] is not None)
-    return {"ok": all_ok, "services": results}
 
 
 # --- Token Throughput ---

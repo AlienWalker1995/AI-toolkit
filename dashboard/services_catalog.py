@@ -1,15 +1,20 @@
 """Service list for dashboard health/UI and ops ID mapping. Separated from app.py for maintainability."""
 from __future__ import annotations
 
-import os
-
 from httpx import AsyncClient
 
-# OpenClaw row uses same env defaults as app.py (docker-compose)
-_OPENCLAW_GATEWAY_PORT = os.environ.get("OPENCLAW_GATEWAY_PORT", "6680")
-_OPENCLAW_GATEWAY_INTERNAL_PORT = os.environ.get("OPENCLAW_GATEWAY_INTERNAL_PORT", "6680")
-_OPENCLAW_UI_PORT = os.environ.get("OPENCLAW_UI_PORT", "6682")
-_OPENCLAW_GATEWAY_TOKEN = os.environ.get("OPENCLAW_GATEWAY_TOKEN", "")
+from dashboard.settings import (
+    OPENCLAW_GATEWAY_INTERNAL_PORT as _OPENCLAW_GATEWAY_INTERNAL_PORT,
+)
+from dashboard.settings import (
+    OPENCLAW_GATEWAY_PORT as _OPENCLAW_GATEWAY_PORT,
+)
+from dashboard.settings import (
+    OPENCLAW_GATEWAY_TOKEN as _OPENCLAW_GATEWAY_TOKEN,
+)
+from dashboard.settings import (
+    OPENCLAW_UI_PORT as _OPENCLAW_UI_PORT,
+)
 
 # Map dashboard service id -> ops-controller service id
 OPS_SERVICE_MAP = {
