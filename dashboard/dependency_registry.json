@@ -25,7 +25,7 @@
       "category": "tools",
       "openclaw_critical": true,
       "check_url": "http://mcp-gateway:8811/mcp",
-      "hint": "Shared MCP tools; openclaw-mcp-bridge connects here."
+      "hint": "Shared MCP tools; openclaw-mcp-bridge uses POST/SSE here. A plain GET may return HTTP 400 — that still means the gateway is up."
     },
     {
       "id": "openclaw-gateway",

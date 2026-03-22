@@ -25,9 +25,11 @@ No GPU required for chat (Ollama runs on CPU, slower but works).
 
 ### Full stack
 
-`docker compose up -d` — all services (Ollama, Open WebUI, ComfyUI, n8n, OpenClaw, MCP Gateway).
+**Recommended:** `./ai-toolkit initialize` (Linux/Mac/Git Bash) or `.\ai-toolkit.ps1 initialize` (Windows) — bootstraps data dirs and config, then rebuilds/recreates and starts all default services.
 
-**OpenClaw web UI:** `http://localhost:6680/?token=<OPENCLAW_GATEWAY_TOKEN>` (not `:6682` — that port is the browser bridge only).
+Alternatively: `docker compose up -d` — same services without the full bootstrap/rebuild step (use the `compose` wrapper if you want auto hardware detection).
+
+**OpenClaw Control UI:** `http://localhost:6680/?token=<OPENCLAW_GATEWAY_TOKEN>`. **Not** `:6682` — that mapped port is the browser/CDP bridge only, not the main UI. If `docker compose` fails on OpenClaw services, see [TROUBLESHOOTING — OpenClaw](runbooks/TROUBLESHOOTING.md#openclaw) for log commands.
 
 ### RAG (documents in chat)
 

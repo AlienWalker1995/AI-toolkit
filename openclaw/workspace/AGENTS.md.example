@@ -24,7 +24,8 @@ Before your first substantive reply in a new session:
 **One path per class of work**
 
 - **LLM calls:** through the **Model Gateway** (OpenAI-compatible). Do not prefer raw Ollama unless diagnosing gateway issues — see TOOLS.md.
-- **Shared tools:** through the **MCP gateway** using the patterns in TOOLS.md (`gateway__call`, `comfyui__call`). Do not invent proxy tool names.
+- **Shared tools:** through the **MCP gateway** using the patterns in TOOLS.md (`gateway__call`, `comfyui__call`). **Never** invoke names like `gateway__duckduckgo__search` or `gateway__comfyui__generate_image` — they are not registered; see **`TOOLS.md`** §CRITICAL and §C.
+- **Web search:** do **not** use native **`web_search`** (Brave, etc.) — it is **disabled** in `openclaw.json`. Use **`gateway__call`** with **`duckduckgo__search`** only.
 - **Direct HTTP to services:** only for flows explicitly documented in TOOLS.md (e.g. ComfyUI diagnosis, dashboard APIs).
 
 **When to use tools**

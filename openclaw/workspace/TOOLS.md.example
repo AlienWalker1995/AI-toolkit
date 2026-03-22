@@ -4,6 +4,20 @@
 
 Environment contract and runbook for this AI-toolkit OpenClaw install. **Keep this file accurate** when URLs, tools, or services change.
 
+## CRITICAL — MCP proxy names (avoid “Tool not found”)
+
+OpenClaw registers only **`gateway__call`** and **`comfyui__call`** as MCP entry tools. **Do not** invoke invented top-level names such as:
+
+- `gateway__duckduckgo__search`, `gateway__comfyui__generate_image`, `gateway__comfyui__list_workflows`, `gateway__playwright__browser_navigate`
+
+Those are **not** registered tool ids. Use **`gateway__call`** with top-level **`tool`** = the server-prefixed name (e.g. `duckduckgo__search`, `comfyui__generate_image`) and **`args`** — see §C.
+
+**Native `web_search` (Brave, Perplexity, etc.):** **disabled** in this install (`tools.web.search.enabled: false` in `openclaw.json`). **Do not** call `web_search`. For web search, use **`gateway__call`** with `tool: "duckduckgo__search"` and **`args`** (e.g. `{"query": "..."}`).
+
+**Bare HTTP to `http://mcp-gateway:8811/mcp`:** A plain browser or `curl` **GET** often returns **400** or errors about **`Mcp-Session-Id`** — the gateway expects the full MCP protocol (POST/SSE/session). From the agent, use **`gateway__call`** instead of probing the URL directly.
+
+---
+
 ## Last verified (manual)
 
 _Update when you change the stack — helps spot stale agent context._
@@ -105,7 +119,7 @@ All tools are reached through the MCP gateway. Add/remove servers via Dashboard 
 
 - **Fetch:** `gateway__call` with `tool: "fetch__fetch_content"` (or the actual fetch tool name from the gateway).
 - **GitHub:** `gateway__call` with `tool: "github__…"`. Needs `GITHUB_PERSONAL_ACCESS_TOKEN`.
-- **Web search:** `gateway__call` with `tool: "duckduckgo__search"`. **Wrong:** `gateway__duckduckgo__search`. Native `web_search` may need `BRAVE_API_KEY`.
+- **Web search:** `gateway__call` with `tool: "duckduckgo__search"`. **Wrong:** `gateway__duckduckgo__search`. **Do not** use native `web_search` — it is disabled here.
 
 **`read` tool:** File paths only — not directories (EISDIR). List dirs with `exec ls` first.
 
@@ -178,15 +192,19 @@ _Not required every message — useful after stack changes or at session start._
 
 | Symptom | Likely cause | What to do |
 |--------|----------------|------------|
+| `Tool not found` for `gateway__duckduckgo__search` / `gateway__comfyui__…` | Hallucinated top-level name | Only **`gateway__call`** / **`comfyui__call`** exist. Pass real tool id in **`tool`** (e.g. `duckduckgo__search`) — see §C and **CRITICAL** above. |
 | `Tool not found` for `comfyui__generate_image` | Wrong tool name | Use **`comfyui__call`** with top-level `tool: "generate_image"` or **`gateway__call`** with `tool: "comfyui__generate_image"`. |
 | `must have required property 'tool'` | `tool` nested in `args` | Top-level `tool` + `args`. |
 | MCP GET / `Accept` errors | Raw HTTP to MCP URL | Use `gateway__call`, not curl GET to `/mcp`. |
-| `401` on dashboard | Missing Bearer | Set `DASHBOARD_AUTH_TOKEN` in `.env` and pass header. |
+| `401` / `Bearer token required` on dashboard `/api/*` | Auth enabled | Pass `Authorization: Bearer $DASHBOARD_AUTH_TOKEN` on protected routes; **`/api/health`** and **`/api/dependencies`** are usually open. |
+| `EACCES` / permission denied on `MEMORY.md` | Workspace files owned by root | Run `docker compose run --rm openclaw-workspace-sync` (sets uid **1000** on the bind mount) and restart the gateway; or `chown -R 1000:1000 data/openclaw/workspace` on Linux. |
+| LTX 2.3 `clip input is invalid: None` | Wrong text/CLIP path | Use **LTX-specific loaders** (e.g. Gemma via **`LTXAVTextEncoderLoader`**) — not plain **`CLIPTextEncode`** off **`CheckpointLoaderSimple`** alone; prefer **`run_workflow`** with a known-good graph. |
 | Connection refused | Service down | Health check; restart via dashboard / docker-ops protocols. |
 | No `gateway/…` models in OpenClaw | Gateway provider / sync | Check `openclaw.json` gateway provider; `merge_gateway_config.py` / dashboard. |
 | ComfyUI `Workflow not found` | Wrong path / not rescanned | Files under **`/comfyui-workflows/`**; restart **comfyui-mcp**; `list_workflows`. |
 | Playwright / snapshot errors | Missing `targetUrl` | Pass full `targetUrl` as required by runtime. |
 | DuckDuckGo missing | Server disabled | Ensure `duckduckgo` in `servers.txt`. |
+| `missing_brave_api_key` / native `web_search` | Model used built-in search | **`web_search` is disabled** (`tools.web.search.enabled: false`). Use **`gateway__call`** + `duckduckgo__search` only. |
 
 ---
 

@@ -14,6 +14,7 @@ $dirs = @(
     (Join-Path $data "n8n-data"),
     (Join-Path $data "n8n-files"),
     (Join-Path $data "dashboard"),
+    (Join-Path $data "qdrant"),
     (Join-Path $data "openclaw"),
     (Join-Path $data "openclaw\workspace"),
     (Join-Path $base "models\comfyui\checkpoints"),

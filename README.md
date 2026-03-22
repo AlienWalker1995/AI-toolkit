@@ -2,7 +2,7 @@
 
 Hey, I am Cam, I made this repo to simplify my local-LLM setup. I wanted a bunch of tools setup in a single spot -- and of course, all dockerized. 
 
-Ollama + Open WebUI + ComfyUI + N8N in Docker. One command (`./compose up -d`), auto-detects hardware for best performance.
+Ollama + Open WebUI + ComfyUI + N8N in Docker. **Bootstrap + full stack:** `.\ai-toolkit.ps1 initialize` (Windows) or `./ai-toolkit initialize` (Linux/Mac). **Quick up:** `./compose up -d` — auto-detects hardware for best performance.
 
 → [Getting started](docs/GETTING_STARTED.md) (includes **RAG** profile) · [Troubleshooting](docs/runbooks/TROUBLESHOOTING.md) · [Architecture](docs/Product%20Requirements%20Document.md)
 
@@ -22,55 +22,46 @@ Ollama + Open WebUI + ComfyUI + N8N in Docker. One command (`./compose up -d`), 
 | model-puller | — | Ready to pull Ollama models on demand |
 | comfyui-model-puller | — | Ready to download LTX-2 models (~60 GB) on demand |
 
-## First-time setup
+## Setup
 
-1. **Clone** the repo to your target drive (e.g. `F:\AI-toolkit` or `~/AI-toolkit`).
-2. **Create `.env`** — copy `.env.example` to `.env` and set `BASE_PATH` to your install path.
-3. **Create directories** — run the setup script (also auto-detects GPU and configures compute, and seeds ComfyUI MCP workflows from `workflow-templates/comfyui-workflows/` into `data/comfyui-workflows/` when missing):
-   - **Windows (PowerShell):** `.\scripts\ensure_dirs.ps1`
-   - **Linux/Mac:** `./scripts/ensure_dirs.sh`
-4. **Start services:** `.\compose.ps1 up -d` (Windows) or `./compose up -d` (Linux/Mac)
-5. **Open the dashboard** at [localhost:8080](http://localhost:8080).
-6. **Pull models** — use the "Starter pack" button or select models from the dropdown.
-7. **Chat** — open [localhost:3000](http://localhost:3000) (Open WebUI).
+1. **Clone** to your drive (e.g. `F:\AI-toolkit` or `~/AI-toolkit`).
+2. **Optional:** `copy .env.example .env` / `cp .env.example .env` and set `BASE_PATH` (and `DATA_PATH` if you want app data outside the repo). The initializer creates `.env` from the example if missing and sets `OPENCLAW_GATEWAY_TOKEN`.
+3. **One command — full bootstrap + stack** (dirs, `ensure_dirs`, OpenClaw workspace seeds, GPU `compute.yml`, then `docker compose up -d --build --force-recreate`):
 
-**No GPU?** Start only the core stack: `.\compose.ps1 up -d ollama dashboard open-webui` — see [Troubleshooting](docs/runbooks/TROUBLESHOOTING.md).
+```powershell
+cd F:\AI-toolkit
+.\ai-toolkit.ps1 initialize
+# cmd.exe: .\ai-toolkit.cmd initialize
+```
+
+```bash
+cd ~/AI-toolkit
+./ai-toolkit initialize
+```
+
+**Manual alternative** (no forced rebuild/recreate): `.\scripts\ensure_dirs.ps1` then `.\compose.ps1 up -d` (Windows) or `./scripts/ensure_dirs.sh` then `./compose up -d` (Linux/Mac).
+
+4. Open the **dashboard** at [localhost:8080](http://localhost:8080); pull models from there; chat at [localhost:3000](http://localhost:3000).
+
+**No GPU?** After init: `.\compose.ps1 up -d ollama dashboard open-webui` — see [Troubleshooting](docs/runbooks/TROUBLESHOOTING.md).
+
+**If ComfyUI or OpenClaw fail:** See dashboard hints and [Troubleshooting](docs/runbooks/TROUBLESHOOTING.md).
 
 ## Daily use
 
-One command — auto-detects hardware and starts with best settings:
+**Full restart** (same as setup step 3): `.\ai-toolkit.ps1 initialize` or `./ai-toolkit initialize`.
+
+**Quick bring-up** (no rebuild/recreate; `compose` runs hardware detection):
 
 ```powershell
-.\compose.ps1 up -d      # Windows
-```
-
-```bash
-./compose up -d          # Linux/Mac
-```
-
-## Quick start (copy-paste)
-
-**Windows (PowerShell):**
-```powershell
-cd F:\AI-toolkit
-copy .env.example .env
-.\scripts\ensure_dirs.ps1
 .\compose.ps1 up -d
 ```
 
-**Linux/Mac:**
 ```bash
-cd ~/AI-toolkit
-cp .env.example .env
-./scripts/ensure_dirs.sh
 ./compose up -d
 ```
 
-All services start by default. Open the **dashboard** at [localhost:8080](http://localhost:8080) to manage models and see service status.
-
-**If ComfyUI or OpenClaw fail:** The dashboard shows troubleshooting hints. ComfyUI uses auto-detected compute (NVIDIA/AMD/Intel/CPU); OpenClaw needs `OPENCLAW_GATEWAY_TOKEN` in the project root `.env` (ensure_dirs adds it if missing). See [Troubleshooting](docs/runbooks/TROUBLESHOOTING.md).
-
-**On-demand commands** (run when you want to pull models):
+**On-demand commands** (pull models when you want):
 - `.\compose.ps1 run --rm model-puller` / `./compose run --rm model-puller` — pull Ollama models from `.env`
 - `.\compose.ps1 run --rm comfyui-model-puller` — download LTX-2 models (~60 GB)
 - `.\compose.ps1 run --rm openclaw-cli onboard` — OpenClaw setup
@@ -150,18 +141,14 @@ Local-first, single model endpoint (OpenAI-compatible), dashboard never mounts d
 
 ## Data
 
-All data is stored under `BASE_PATH` via bind mounts — no Docker named volumes.
+Bind mounts only (no Docker named volumes). Set **`BASE_PATH`** in `.env` to the repo root. Optional **`DATA_PATH`** defaults to `BASE_PATH/data`; many services use it, but some paths are still under `BASE_PATH/data` (see `docker-compose.yml`). Ollama model blobs live under **`models/ollama`**.
 
-| Path | Contents |
-|------|----------|
-| `data/ollama` | Ollama models |
-| `data/open-webui` | Users, chats, settings |
-| `data/comfyui-output` | Generated images/video |
-| `data/comfyui-workflows` | API-format workflows for MCP (`list_workflows` / `run_workflow`), OpenClaw (`/comfyui-workflows`), and ComfyUI UI sidebar under **Workflow → mcp-api** |
-| `data/n8n-data` | Workflows |
-| `data/n8n-files` | Shared files |
-| `data/openclaw` | OpenClaw config + workspace (SOUL/AGENTS/TOOLS + optional USER, MEMORY, etc.) |
-| `models/comfyui/` | LTX-2 models (downloaded on demand) |
+| Location | Contents |
+|----------|----------|
+| `models/ollama` | Ollama models |
+| `models/comfyui/` | ComfyUI / LTX-2 weights (on demand) |
+| `data/…` (or `DATA_PATH/…` where compose uses `DATA_PATH`) | Open WebUI, dashboard, n8n, MCP config, Qdrant, RAG input, ComfyUI output, etc. |
+| `BASE_PATH/data/…` where not using `DATA_PATH` | e.g. ComfyUI storage/workflows, OpenClaw config/workspace (unless `OPENCLAW_*` overrides) |
 
 ## MCP (Model Context Protocol)
 
@@ -171,17 +158,25 @@ The [MCP Gateway](mcp/) exposes shared MCP tools (web search, GitHub, etc.) to a
 
 [OpenClaw](openclaw/) is a personal AI assistant, integrated in the main compose. See [openclaw/README.md](openclaw/README.md) for token setup.
 
+If the agent cannot write **`data/openclaw/workspace/MEMORY.md`** (`EACCES`), or **`TOOLS.md`** is still an old stub, run **`scripts/fix_openclaw_workspace_permissions.ps1`** (Windows) or **`./scripts/fix_openclaw_workspace_permissions.sh`** (Linux/Mac) from the repo root — it upgrades **`TOOLS.md`** from the template when needed, re-runs sync (**`chown`**), then restart **`openclaw-gateway`**. See [TROUBLESHOOTING — OpenClaw workspace](docs/runbooks/TROUBLESHOOTING.md#openclaw-workspace--eacces--permission-denied-on-memorymd-or-other-md).
+
 ## Commands
 
 ```powershell
-# Project management CLI
-./ai-toolkit initialize   # Bootstrap directories, generate tokens, detect hardware, start services
-./ai-toolkit help
+# One command: bootstrap + rebuild/recreate + start the full default stack (from repo root)
+.\ai-toolkit.ps1 initialize
+# cmd.exe: .\ai-toolkit.cmd initialize
 
-# Docker compose wrapper
-.\compose.ps1 up -d       # Start all services (auto-detects hardware)
+# Docker compose wrapper (quick up — no forced rebuild/recreate)
+.\compose.ps1 up -d
 .\compose.ps1 logs -f ollama
-.\compose.ps1 down        # Stop
+.\compose.ps1 down
+```
+
+```bash
+./ai-toolkit initialize
+./ai-toolkit help
+./compose up -d
 ```
 
 ## Tests and lint

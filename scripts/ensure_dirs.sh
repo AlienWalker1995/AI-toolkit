@@ -20,6 +20,7 @@ dirs=(
   "$data/n8n-data"
   "$data/n8n-files"
   "$data/dashboard"
+  "$data/qdrant"
   "$data/openclaw"
   "$data/openclaw/workspace"
   "$base/models/comfyui/checkpoints"

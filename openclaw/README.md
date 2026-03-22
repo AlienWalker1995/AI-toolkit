@@ -6,13 +6,17 @@
 
 ### 1. Prepare directories and workspace
 
-From the **repo root** (e.g. `F:\AI-toolkit`):
+From the **repo root** (e.g. `F:\AI-toolkit`), the **main** path is **`.\ai-toolkit.ps1 initialize`** (runs `ensure_dirs`, OpenClaw workspace seeding, then full compose — see root [README.md](../README.md)).
+
+Manual equivalent:
 
 ```powershell
 $env:BASE_PATH = "F:/AI-toolkit"
 .\scripts\ensure_dirs.ps1
 .\openclaw\scripts\ensure_openclaw_workspace.ps1
 ```
+
+Linux/Mac: `openclaw/scripts/ensure_openclaw_workspace.sh` (same behavior as the `.ps1`).
 
 ### 2. Configure environment
 
@@ -27,7 +31,7 @@ Edit `.env` and set:
 - `OPENCLAW_GATEWAY_TOKEN` — generate with `openssl rand -hex 32`
 - **Ollama** — enabled by default when using the main compose; models from `ollama` are auto-discovered
 - Optional cloud APIs: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, or `OPENROUTER_API_KEY`
-- **Discord / Telegram (optional):** set `DISCORD_TOKEN` and/or `TELEGRAM_BOT_TOKEN` in the **project root** `.env` (same file the main compose uses). On startup, `openclaw-config-sync` runs `openclaw/scripts/merge_gateway_config.py`, which rewrites channel entries in `data/openclaw/openclaw.json` to OpenClaw **SecretRef** form so bot tokens are not stored as plaintext in the JSON. See [OPENCLAW_SECURE.md](OPENCLAW_SECURE.md) §4.
+- **Discord / Telegram (optional):** set `DISCORD_TOKEN` and/or `TELEGRAM_BOT_TOKEN` in the **project root** `.env` (same file the main compose uses). On startup, `openclaw-config-sync` runs `openclaw/scripts/merge_gateway_config.py`, which rewrites channel entries in `data/openclaw/openclaw.json` to OpenClaw **SecretRef** form (`source`, **`provider: default`**, `id` — required on OpenClaw 2026.3.x) so bot tokens are not stored as plaintext in the JSON. See [OPENCLAW_SECURE.md](OPENCLAW_SECURE.md) §4 and [TROUBLESHOOTING — OpenClaw](../docs/runbooks/TROUBLESHOOTING.md#openclaw) if the gateway reports invalid channel token.
 
 ### 3. Start OpenClaw
 
@@ -74,14 +78,18 @@ Layering (see templates in `openclaw/workspace/`). **In git:** only `*.md.exampl
 
 Sub-agents read **AGENTS.md** and **TOOLS.md**, not `SOUL.md` — keep critical rules there or in TOOLS.
 
-**Seeding:** `ensure_openclaw_workspace.ps1` copies missing files from `openclaw/workspace/` (or `*.example`) into `data/openclaw/workspace/`.
+**Seeding:** `ensure_openclaw_workspace.ps1` (Windows) or `ensure_openclaw_workspace.sh` (Linux/Mac) copies missing files from `openclaw/workspace/` (or `*.example`) into `data/openclaw/workspace/`.
 
-**Docker sync (`openclaw-workspace-sync`):** For each workspace `*.md`, copies from the repo **only if the file does not already exist** in `data/openclaw/workspace/` (so local edits persist). **`health_check.sh`** and **`agents/`** are still refreshed from the repo on every sync. To pick up a new upstream template for a given markdown file, remove that file from `data/openclaw/workspace/` once, then restart the stack (or re-run the sync service).
+**Docker sync (`openclaw-workspace-sync`):** For each workspace `*.md`, copies from the repo **only if the file does not already exist** in `data/openclaw/workspace/` (so local edits persist). **`TOOLS.md`** is **upgraded from `TOOLS.md.example`** when it is missing or still a **short stub** (detected by missing contract text). Set **`OPENCLAW_SKIP_TOOLS_MD_UPGRADE=1`** to keep a deliberately minimal `TOOLS.md`. **`health_check.sh`** and **`agents/`** are still refreshed from the repo on every sync. After seeding, the sync container runs **`chown -R 1000:1000`** on `/workspace` so the gateway user **`node`** can edit **`MEMORY.md`** and other files. If you still see **`EACCES`** on writes, run **`scripts/fix_openclaw_workspace_permissions`** (or `docker compose run --rm openclaw-workspace-sync`) and restart `openclaw-gateway` — see [TROUBLESHOOTING — OpenClaw workspace](../docs/runbooks/TROUBLESHOOTING.md#openclaw-workspace--eacces--permission-denied-on-memorymd-or-other-md).
 
 ## Data Paths
 
 - **Config:** `data/openclaw/` (openclaw.json, agents, etc.)
 - **Workspace:** `data/openclaw/workspace/` (files above, plus `memory/`)
+
+### Native `web_search` (Brave, etc.)
+
+The template **`openclaw.json.example`** sets **`tools.web.search.enabled: false`** so OpenClaw does not expose native **`web_search`**. Use the MCP gateway: **`gateway__call`** with **`duckduckgo__search`** for web search (see **`TOOLS.md`**). To opt into built-in search, see [OpenClaw web tools](https://docs.openclaw.ai/tools/web) and set **`enabled: true`** plus a provider API key.
 
 ## Discord (default channel)
 

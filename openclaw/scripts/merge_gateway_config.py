@@ -44,7 +44,8 @@ OLLAMA_NUM_CTX = int(_ctx_raw) if _ctx_raw.isdigit() and int(_ctx_raw) > 0 else 
 
 
 def _secret_ref(env_id: str) -> dict:
-    return {"source": "env", "id": env_id}
+    # OpenClaw schema requires `provider` (see SecretRef / openclaw config set --ref-provider default).
+    return {"source": "env", "provider": "default", "id": env_id}
 
 
 def _inject_channel_secret_refs(data: dict) -> bool:
@@ -212,6 +213,18 @@ def main() -> int:
     if compaction.get("mode") != "default":
         compaction["mode"] = "default"
         modified = True
+
+    # Native web_search (Brave, etc.): keep disabled — use MCP gateway__call + duckduckgo__search.
+    # Opt-in: OPENCLAW_NATIVE_WEB_SEARCH=1 skips forcing false (configure provider + keys per OpenClaw docs).
+    if os.environ.get("OPENCLAW_NATIVE_WEB_SEARCH", "").strip() != "1":
+        tools = data.setdefault("tools", {})
+        if isinstance(tools, dict):
+            web = tools.setdefault("web", {})
+            if isinstance(web, dict):
+                search = web.setdefault("search", {})
+                if isinstance(search, dict) and search.get("enabled") is not False:
+                    search["enabled"] = False
+                    modified = True
 
     # Disable device pairing (not needed in Docker — token auth is sufficient)
     control_ui = gateway.setdefault("controlUi", {})

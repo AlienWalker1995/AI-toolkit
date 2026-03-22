@@ -12,7 +12,8 @@ docker compose logs --tail=50
 # Health checks (host → published ports)
 curl -s http://localhost:8080/api/health | jq
 curl -s http://localhost:11435/health | jq
-curl -s http://localhost:8811/mcp
+# MCP URL: bare GET often fails (MCP session/protocol). Prefer OpenClaw `gateway__call` or a real MCP client — do not treat HTTP 400 here as “gateway down”.
+# curl -s http://localhost:8811/mcp
 
 # Full dependency matrix (same data as Dashboard → Dependencies)
 curl -s http://localhost:8080/api/dependencies | jq
@@ -57,9 +58,101 @@ docker compose logs <service-name>
 | Model Gateway  | `docker compose logs model-gateway` |
 | MCP Gateway    | `docker compose logs mcp-gateway` |
 | Ops Controller | `docker compose logs ops-controller` |
+| OpenClaw gateway | `docker compose logs openclaw-gateway` (see **OpenClaw** below) |
+
+## OpenClaw
+
+### Control UI (correct URL)
+
+- **Use:** `http://localhost:6680/?token=<OPENCLAW_GATEWAY_TOKEN>` — token from the project root `.env` (`OPENCLAW_GATEWAY_TOKEN`).
+- **Do not use:** `:6682` for the **Control UI**. Host port **6682** is mapped to a **socat** sidecar that forwards to OpenClaw’s **loopback-only browser/CDP bridge** inside the container. Opening `http://localhost:6682` in a browser is **not** the main gateway Control UI and will confuse debugging.
+
+**Summary:** **6680** = gateway + Control UI (what you want). **6682** = browser/CDP bridge path only.
+
+### Logs (when `docker compose` reports errors involving OpenClaw)
+
+```bash
+# Gateway (main process)
+docker compose logs --tail=100 openclaw-gateway
+
+# Follow live while reproducing an issue
+docker compose logs -f openclaw-gateway
+
+# Sidecar: exposes internal browser UI port to host (6682 → 6685 → 127.0.0.1:6682)
+docker compose logs --tail=50 openclaw-ui-proxy
+
+# One-shot config merge before gateway starts (model list, token injection)
+docker compose logs openclaw-config-sync
+
+# Workspace file copy (runs before gateway)
+docker compose logs openclaw-workspace-sync
+```
+
+If the gateway fails healthchecks or exits: confirm **`openclaw-config-sync`** completed successfully (the gateway waits on it). If **`OPENCLAW_GATEWAY_TOKEN`** is missing in `.env`, set one (`openssl rand -hex 32`) and restart: `docker compose up -d openclaw-gateway`.
+
+### Discord / channel token (SecretRef)
+
+If logs show **`Config invalid`** / **`channels.discord.token: Invalid input`** (or Telegram equivalent):
+
+1. OpenClaw **2026.3.x** expects env SecretRefs to include **`"provider": "default"`** alongside `"source": "env"` and `"id": "DISCORD_BOT_TOKEN"` (or your env key id).
+2. Ensure the repo’s `openclaw/scripts/merge_gateway_config.py` emits that shape, then run config sync and restart:
+   ```bash
+   docker compose up -d model-gateway
+   docker compose run --rm openclaw-config-sync
+   docker compose up -d openclaw-gateway
+   ```
+3. Or hand-edit `data/openclaw/openclaw.json` under `channels.discord.token` (and `channels.telegram.botToken` if used) to add `"provider": "default"`.
+4. Confirm **`DISCORD_TOKEN`** in `.env` is the real bot token (compose passes it as **`DISCORD_BOT_TOKEN`** inside the gateway).
+
+See [SECURITY_HARDENING.md](SECURITY_HARDENING.md) §11 (OpenClaw secrets).
+
+More detail: [openclaw/README.md](../../openclaw/README.md).
+
+### MCP tools — `Tool not found` / `Mcp-Session-Id` / `missing_brave_api_key`
+
+**`Tool not found` for names like `gateway__duckduckgo__search` or `gateway__comfyui__generate_image`:** Those are **not** real OpenClaw tool ids. The bridge exposes **`gateway__call`** and **`comfyui__call`** only; the MCP tool name (e.g. `duckduckgo__search`) goes in the **`tool`** field with **`args`**. See [openclaw/workspace/TOOLS.md.example](../../openclaw/workspace/TOOLS.md.example) §C and the **CRITICAL** section at the top.
+
+**Same error for `gateway__n8n__workflow_list`:** Identical mistake — use **`gateway__call`** with inner `tool: "n8n__workflow_list"` (and valid n8n API auth if that tool requires it).
+
+**Not “MCP / DuckDuckGo disabled”:** If **`duckduckgo`** appears in **`data/mcp/servers.txt`** and **`mcp-gateway`** is healthy, the DuckDuckGo MCP server is in the stack. **`Tool not found`** on invented top-level names is almost always **wrong OpenClaw tool id**, not a missing server.
+
+**Long `AGENTS.md` and bootstrap truncation:** OpenClaw may inject only the **first ~20 000 characters** of **`AGENTS.md`** into context (`workspace bootstrap file AGENTS.md … truncating` in gateway logs). Avoid misleading shorthand like **`gateway__n8n_*`** / **`gateway__playwright_*`** as if they were tool names — models often expand those to invalid **`gateway__n8n__workflow_list`**-style ids. Keep the **CRITICAL** naming rules (only **`gateway__call`** / **`comfyui__call`**) in the **first** section of a long AGENTS file, or rely on **`TOOLS.md`** (shorter) for the contract.
+
+If **`data/openclaw/workspace/TOOLS.md`** is an old short stub: **`openclaw-workspace-sync`** (and **`scripts/fix_openclaw_workspace_permissions`**) now **replace** it with **`TOOLS.md.example`** when the file lacks the current contract marker (`gateway__duckduckgo__search`). Set **`OPENCLAW_SKIP_TOOLS_MD_UPGRADE=1`** in `.env` to disable this. You can also run **`openclaw/scripts/upgrade_tools_md_from_example.ps1`** (Windows) or **`.sh`** (Linux/Mac) from the repo.
+
+**`GET requires an Mcp-Session-Id header` or 400 on `http://…:8811/mcp`:** Expected for raw `curl`/browser GET. The MCP gateway speaks the MCP transport; use **`gateway__call`** from OpenClaw or a proper MCP client — not a naked GET probe.
+
+**`missing_brave_api_key` on native `web_search`:** This repo’s **`openclaw.json`** sets **`tools.web.search.enabled: false`** so native **`web_search`** is off — use **`gateway__call`** with **`duckduckgo__search`** (MCP) for web search. To use Brave or another built-in provider instead, set **`tools.web.search.enabled: true`**, configure a provider per [OpenClaw web tools](https://docs.openclaw.ai/tools/web), and set the matching API key in `.env`.
+
+### OpenClaw workspace — `EACCES` / `permission denied` on `MEMORY.md` (or other `*.md`)
+
+The gateway runs as **`node` (uid 1000)**. If workspace files were created **as root** (e.g. manual `docker run`, editor as admin, or an old sync without ownership fix), **`edit` / `write` on `MEMORY.md` fails** inside the container.
+
+**Fix (recommended):** Re-run workspace sync so bind-mounted files are **`chown`’d to 1000:1000** (compose does this after seeding):
+
+```bash
+docker compose run --rm openclaw-workspace-sync
+docker compose up -d openclaw-gateway
+```
+
+**Host-only (Linux):** from the repo, `sudo chown -R 1000:1000 data/openclaw/workspace`.
+
+**Windows (host file ACL):** ensure your user (or “Users”) has **Modify** on `data\openclaw\workspace`; remove inherited deny if any. If a file was created as Administrator, delete it once or take ownership, then re-run sync.
+
+### Dashboard API — `Bearer token required` / `401`
+
+When **`DASHBOARD_AUTH_TOKEN`** is set in `.env`, most **`/api/*`** routes require:
+
+`Authorization: Bearer <DASHBOARD_AUTH_TOKEN>`
+
+Automated tools and agents calling the dashboard from **inside** the stack should pass this header (see **`TOOLS.md`** §F). **`GET /api/health`** and **`GET /api/dependencies`** stay unauthenticated unless your build changed that.
+
+### ComfyUI — LTX 2.3 video and `clip input is invalid: None`
+
+**`ltx-2.3-22b`** is not a generic SD1.5 checkpoint graph: plain **`CLIPTextEncode`** off **`CheckpointLoaderSimple`** often yields **no CLIP**. Use the **LTX / Gemma text path** your ComfyUI build documents (e.g. **`LTXAVTextEncoderLoader`** + **`CLIPTextEncodeFlux`** wired to that CLIP), or **`comfyui__call` `run_workflow`** with a workflow id that already matches your nodes — see **`TOOLS.md`** §D–E and packaged workflows under **`data/comfyui-workflows/`**.
 
 ## Escalation
 
 - **Security**: See [SECURITY.md](../../SECURITY.md)
 - **Architecture**: See [Product Requirements Document](../Product%20Requirements%20Document.md)
-- **OpenClaw**: Web Control UI defaults to gateway port **6680** (`http://localhost:6680/?token=...`). **6682** is the browser/CDP bridge only. See [openclaw/README.md](../../openclaw/README.md).
+- **OpenClaw**: See **OpenClaw** section above and [openclaw/README.md](../../openclaw/README.md).

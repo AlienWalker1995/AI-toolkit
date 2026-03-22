@@ -22,4 +22,5 @@ foreach ($f in $files) {
         }
     }
 }
+& (Join-Path $PSScriptRoot "upgrade_tools_md_from_example.ps1") -Base $base
 Write-Host "OpenClaw workspace ready."

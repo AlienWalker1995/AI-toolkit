@@ -40,7 +40,7 @@ Services bind to `0.0.0.0` to allow access from other machines on your network. 
 - Use `.env.example` as a template; copy to `.env` and fill in values locally.
 - API keys (OpenAI, Anthropic, etc.) and tokens should only live in `.env` files, never in the repository.
 - **Never commit** `data/` — it is gitignored and contains user-specific config (OpenClaw gateway token, Discord guild/user IDs, session data, etc.). All secrets and setup-specific values belong in `data/` or `.env`, not in shared code.
-- **OpenClaw channels:** Prefer `DISCORD_TOKEN` and `TELEGRAM_BOT_TOKEN` in `.env`; `openclaw-config-sync` can rewrite channel entries to env-backed SecretRefs so bot tokens are not stored as plaintext in `openclaw.json` (see `docs/runbooks/SECURITY_HARDENING.md` §11).
+- **OpenClaw channels:** Prefer `DISCORD_TOKEN` and `TELEGRAM_BOT_TOKEN` in `.env`; `openclaw-config-sync` can rewrite channel entries to env-backed SecretRefs (`source` + `provider: default` + `id`; required shape on OpenClaw 2026.3.x — see `docs/runbooks/SECURITY_HARDENING.md` §11 and `docs/runbooks/TROUBLESHOOTING.md` OpenClaw).
 
 ### Data
 

@@ -1,1 +1,19 @@
-{"models":{"providers":{"gateway":{"baseUrl":"http://model-gateway:11435/v1","apiKey":"ollama-local","api":"openai-responses","headers":{"X-Service-Name":"openclaw"}}}}}
+{
+  "models": {
+    "providers": {
+      "gateway": {
+        "baseUrl": "http://model-gateway:11435/v1",
+        "apiKey": "ollama-local",
+        "api": "openai-responses",
+        "headers": { "X-Service-Name": "openclaw" }
+      }
+    }
+  },
+  "tools": {
+    "web": {
+      "search": {
+        "enabled": false
+      }
+    }
+  }
+}
