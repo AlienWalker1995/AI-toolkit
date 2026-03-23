@@ -4,7 +4,7 @@ Hey, I am Cam, I made this repo to simplify my local-LLM setup. I wanted a bunch
 
 Ollama + Open WebUI + ComfyUI + N8N in Docker. **Bootstrap + full stack:** `.\ai-toolkit.ps1 initialize` (Windows) or `./ai-toolkit initialize` (Linux/Mac). **Quick up:** `./compose up -d` — auto-detects hardware for best performance.
 
-→ [Getting started](docs/GETTING_STARTED.md) (includes **RAG** profile) · [Troubleshooting](docs/runbooks/TROUBLESHOOTING.md) · [Architecture](docs/Product%20Requirements%20Document.md)
+→ [Getting started](docs/GETTING_STARTED.md) · [Configuration](docs/configuration.md) · [Docker Runtime](docs/docker-runtime.md) · [Data](docs/data.md) · [Troubleshooting](docs/runbooks/TROUBLESHOOTING.md) · [Architecture](docs/Product%20Requirements%20Document.md)
 
 ## Services
 
@@ -143,12 +143,9 @@ Local-first, single model endpoint (OpenAI-compatible), dashboard never mounts d
 
 Bind mounts only (no Docker named volumes). Set **`BASE_PATH`** in `.env` to the repo root. Optional **`DATA_PATH`** defaults to `BASE_PATH/data`; many services use it, but some paths are still under `BASE_PATH/data` (see `docker-compose.yml`). Ollama model blobs live under **`models/ollama`**.
 
-| Location | Contents |
-|----------|----------|
-| `models/ollama` | Ollama models |
-| `models/comfyui/` | ComfyUI / LTX-2 weights (on demand) |
-| `data/…` (or `DATA_PATH/…` where compose uses `DATA_PATH`) | Open WebUI, dashboard, n8n, MCP config, Qdrant, RAG input, ComfyUI output, etc. |
-| `BASE_PATH/data/…` where not using `DATA_PATH` | e.g. ComfyUI storage/workflows, OpenClaw config/workspace (unless `OPENCLAW_*` overrides) |
+For detailed data schemas, lifecycle, and persistence rules, see **[docs/data.md](docs/data.md)**.
+
+For core workspace layout and volume mounts, see **[docs/docker-runtime.md](docs/docker-runtime.md)**.
 
 ## MCP (Model Context Protocol)
 
@@ -158,7 +155,27 @@ The [MCP Gateway](mcp/) exposes shared MCP tools (web search, GitHub, etc.) to a
 
 [OpenClaw](openclaw/) is a personal AI assistant, integrated in the main compose. See [openclaw/README.md](openclaw/README.md) for token setup.
 
+### OpenClaw Control UI Access
+
+**Main Control UI:** `http://localhost:6680/?token=<OPENCLAW_GATEWAY_TOKEN>`
+
+**Note:** The Control UI is at port `6680`. Port `6682` is the browser/CDP bridge only (used internally).
+
 If the agent cannot write **`data/openclaw/workspace/MEMORY.md`** (`EACCES`), or **`TOOLS.md`** is still an old stub, run **`scripts/fix_openclaw_workspace_permissions.ps1`** (Windows) or **`./scripts/fix_openclaw_workspace_permissions.sh`** (Linux/Mac) from the repo root — it upgrades **`TOOLS.md`** from the template when needed, re-runs sync (**`chown`**), then restart **`openclaw-gateway`**. See [TROUBLESHOOTING — OpenClaw workspace](docs/runbooks/TROUBLESHOOTING.md#openclaw-workspace--eacces--permission-denied-on-memorymd-or-other-md).
+
+### OpenClaw Core Workspace
+
+The OpenClaw agent workspace lives at `data/openclaw/workspace/`. These files persist across container restarts:
+
+| File | Description |
+|---|-|
+| `MEMORY.md` | **Persistent memory** — key file for agent continuity |
+| `TOOLS.md` | Tool definitions and usage |
+| `SOUL.md` | Core agent identity and purpose |
+| `AGENTS.md` | Agent definitions |
+| `USER.md` | User profile and preferences |
+
+For complete workspace documentation, see **[docs/configuration.md](docs/configuration.md)** and **[docs/docker-runtime.md](docs/docker-runtime.md)**.
 
 ## Commands
 

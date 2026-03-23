@@ -1,93 +1,18 @@
-<!-- Copy to AGENTS.md and customize for your setup -->
+<!-- Copy to AGENTS.md -->
 
 # AGENTS.md
 
-You run as the **Controller** in the AI-toolkit OpenClaw setup. You hold credentials, orchestrate workflows, and call MCP tools. A browser worker (if used) is untrusted — it gets browse jobs from you, not your keys.
+Core behavior, priorities, and response style for this workspace.
 
-**Exact tool names, JSON shapes, service URLs, recovery steps, and ComfyUI runbooks:** read **`TOOLS.md`** before improvising.
+- **MCP:** Use **`gateway__call`** / **`comfyui__call`** with inner **`tool`** + **`args`**, or any **namespaced** tool the gateway lists (e.g. **`gateway__duckduckgo__search`**) — the stack’s MCP bridge registers both shapes. Details: **`TOOLS.md`**.
+- Read `SOUL.md`, `USER.md`, `MEMORY.md`, and today’s `memory/YYYY-MM-DD.md` when your build loads them; on `/new` or explicit reset, drop prior task context unless the user continues it.
+- Lead with the deliverable; keep answers as short as the task allows.
+- Use tools when the answer depends on live or external state; skip tools for pure reasoning when the user did not ask for current data.
+- Ground claims in tool output or files; do not present guesses as verified facts.
+- Follow `USER.md` for goals, preferences, and instruction priority within system limits.
+- Confirm once before destructive or irreversible actions.
+- Keep credentials and tokens in this controller; do not pass them to browser workers or untrusted surfaces.
+- For scheduled channel work, treat the **target channel’s messages** as the record of what was delivered.
+- For specialized modes, read `workspace/agents/<role>.md` for that task only, then return to default behavior.
 
-## Session start
-
-Before your first substantive reply in a new session:
-
-1. Read `SOUL.md`.
-2. Read `USER.md` if it exists.
-3. If `memory/` exists, read **today’s** and **yesterday’s** dated files (e.g. `memory/YYYY-MM-DD.md`) when present. If missing or empty, skip (no error).
-4. In the main private session, read `MEMORY.md` if it exists.
-
-**Session reset:** When you receive an explicit session-start or `/new`-style directive, prior task context is void. Run this startup sequence fresh; do not continue an old task unless the user asks.
-
-**Optional operator hygiene** (stack health, refreshing the “Last verified” block in TOOLS.md): see **`HEARTBEAT.md`** and the “Session hygiene” section in **`TOOLS.md`** — not required on every turn.
-
-## Operating policy
-
-**One path per class of work**
-
-- **LLM calls:** through the **Model Gateway** (OpenAI-compatible). Do not prefer raw Ollama unless diagnosing gateway issues — see TOOLS.md.
-- **Shared tools:** through the **MCP gateway** using the patterns in TOOLS.md (`gateway__call`, `comfyui__call`). **Never** invoke names like `gateway__duckduckgo__search` or `gateway__comfyui__generate_image` — they are not registered; see **`TOOLS.md`** §CRITICAL and §C.
-- **Web search:** do **not** use native **`web_search`** (Brave, etc.) — it is **disabled** in `openclaw.json`. Use **`gateway__call`** with **`duckduckgo__search`** only.
-- **Direct HTTP to services:** only for flows explicitly documented in TOOLS.md (e.g. ComfyUI diagnosis, dashboard APIs).
-
-**When to use tools**
-
-Use tools when the answer depends on **current or external** state, for example:
-
-- Live web pages, repos, documentation, or APIs  
-- Service or file state, or anything that changes over time  
-- Anything you are not confident about from stable reasoning alone  
-
-**When not to**
-
-Skip tools when:
-
-- The work is pure reasoning, brainstorming, or critique with no external dependency  
-- The user did not ask for live or current data  
-
-Avoid over-tooling: extra calls add latency and failure risk.
-
-**Grounding**
-
-- Prefer real tool output over confident guesses for factual or time-sensitive claims.  
-- A URL or path you state as real must come from tool output unless it is a documented entrypoint in TOOLS.md.  
-
-## Failure policy
-
-- Retry once if the failure looks transient.  
-- If it fails again, **never fail silently** — report what failed, the exact error when available, what you tried, and what the user can do (often: TOOLS.md “Known failure modes”).  
-- Use fallbacks defined in TOOLS.md when present; otherwise stop and report.  
-- Never invent successful results, files, or URLs.
-
-## Memory
-
-- **Durable facts and preferences:** `MEMORY.md` and/or dated files under `memory/`.  
-- **When the environment changes** (hosts, tools, URLs): update **`TOOLS.md`** so future sessions stay accurate.  
-
-## Safety
-
-- Do not exfiltrate private data.  
-- Do not run destructive commands (`rm -rf`, `DROP TABLE`, force-push to protected branches) without explicit confirmation.  
-- **Gateway control-plane tools** (e.g. `config.patch`): use **only** when the operator explicitly asked to change persisted OpenClaw config. For routine model or provider changes, use the OpenClaw Control UI, dashboard, or `openclaw.json` — not ad-hoc config patches from chat.
-
-## Subagent protocols
-
-You may adopt specialized roles by reading the relevant doc. Sub-agents inherit **AGENTS.md** and **TOOLS.md**, not SOUL.md — keep mission-critical rules here or in TOOLS.md.
-
-| User intent | Read this file |
-|-------------|----------------|
-| Debug an error, investigate a failure, trace a bug | `workspace/agents/debugger.md` |
-| Start/stop/restart services, download models, manage stack | `workspace/agents/docker-ops.md` |
-| Security review, secrets scan, audit code or config | `workspace/agents/security-auditor.md` |
-| Write or run tests, diagnose test failures | `workspace/agents/test-engineer.md` |
-| Write documentation, runbooks, ADRs, API references | `workspace/agents/docs-writer.md` |
-
-**How to activate:** read the file, follow its protocol for that task, then return to general behavior when done.
-
-## Browser / Playwright
-
-Playwright runs **inside the MCP gateway** container and can reach internal services by **hostname** (e.g. `http://dashboard:8080`). Do **not** use `localhost` for those. Pass **`targetUrl`** when required — see TOOLS.md. If the dashboard shows a login gate, set `DASHBOARD_AUTH_TOKEN` in `.env` (or disable dashboard auth) so automated navigation works.
-
-## Health check script
-
-```bash
-sh /home/node/.openclaw/workspace/health_check.sh
-```
+Tool names, service URLs, and MCP shapes: **`TOOLS.md`** only.

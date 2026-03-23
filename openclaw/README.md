@@ -2,6 +2,8 @@
 
 [OpenClaw](https://docs.openclaw.ai) is a self-hosted personal AI assistant that runs in Docker. This folder provides a ready-to-use setup integrated with the AI-toolkit project.
 
+**Manual sync (re-run `merge_gateway_config`, workspace seed, MCP plugin config):** see [Configuration — Re-run OpenClaw sync](../docs/configuration.md#re-run-openclaw-sync-manual) for exact `docker compose run --rm …` service names (there is no `openclaw-merge-config`).
+
 ## Quick Start
 
 ### 1. Prepare directories and workspace
@@ -49,7 +51,7 @@ Use the token from `.env` when prompted.
 
 ### 5. Access the UI
 
-With the **main** `docker-compose.yml`, the web Control UI is on the **gateway** port (default **6680**). Open **`http://localhost:6680/?token=<OPENCLAW_GATEWAY_TOKEN>`** (token from `.env`). In Settings → Model, choose a model from the **gateway** provider (e.g. `gateway/ollama/deepseek-r1:7b`) — this routes through the Model Gateway so dashboard monitoring shows performance. MCP tools (web search, etc.) from the gateway at `http://mcp-gateway:8811/mcp` are exposed via the **openclaw-mcp-bridge** plugin — the agent can call them automatically. **Do not use :6682** for this UI — that port is the browser/CDP bridge only.
+With the **main** `docker-compose.yml`, the web Control UI is on the **gateway** port (default **6680**). Open **`http://localhost:6680/?token=<OPENCLAW_GATEWAY_TOKEN>`** (token from `.env`). In Settings → Model, choose a model from the **gateway** provider (e.g. `gateway/ollama/deepseek-r1:7b`) — this routes through the Model Gateway so dashboard monitoring shows performance. MCP tools (web search, etc.) from the gateway at `http://mcp-gateway:8811/mcp` are exposed via a **forked** **openclaw-mcp-bridge** (see [`extensions/openclaw-mcp-bridge/README-AI-TOOLKIT.md`](extensions/openclaw-mcp-bridge/README-AI-TOOLKIT.md)) — namespaced tools such as `gateway__duckduckgo__search` are registered as first-class OpenClaw tools, not only `gateway__call`. **Do not use :6682** for this UI — that port is the browser/CDP bridge only.
 
 If you use **`overrides/openclaw-secure.yml`**, the mapped gateway port is typically **18789** on localhost — see [OPENCLAW_SECURE.md.example](OPENCLAW_SECURE.md.example).
 
@@ -70,13 +72,13 @@ Layering (see templates in `openclaw/workspace/`). **In git:** only `*.md.exampl
 | `SOUL.md` | Identity, tone, boundaries — minimal operational detail |
 | `USER.md` | Operator profile and preferences (optional; from `USER.md.example`) |
 | `IDENTITY.md` | Optional display name / avatar notes (from `IDENTITY.md.example`) |
-| `AGENTS.md` | Operating policy: startup order, when to use tools, failure and memory rules, safety |
-| `TOOLS.md` | **Environment contract:** URLs, MCP invocation, ComfyUI/dashboard runbooks, failure modes |
+| `AGENTS.md` | Operating policy; **starts with non-negotiables** (MCP names, Discord/cron truth, message length) so they survive bootstrap truncation |
+| `TOOLS.md` | **Short canonical contract:** URLs, MCP (**`gateway__call`** / namespaced tools / **`comfyui__call`**), cron+Discord — deep ComfyUI/ops detail in **`workspace/agents/docker-ops.md`** and **TROUBLESHOOTING** |
 | `MEMORY.md` | Curated long-term notes (main session) |
 | `HEARTBEAT.md` | Optional operator checklist (from `HEARTBEAT.md.example`) |
 | `memory/` | Dated episodic notes (`YYYY-MM-DD.md`) |
 
-Sub-agents read **AGENTS.md** and **TOOLS.md**, not `SOUL.md` — keep critical rules there or in TOOLS.
+Sub-agents read **AGENTS.md** and **TOOLS.md**, not `SOUL.md` — put **non-negotiable tool + Discord rules at the top of `AGENTS.md`**; keep **`TOOLS.md` short** (canonical only).
 
 **Seeding:** `ensure_openclaw_workspace.ps1` (Windows) or `ensure_openclaw_workspace.sh` (Linux/Mac) copies missing files from `openclaw/workspace/` (or `*.example`) into `data/openclaw/workspace/`.
 
@@ -106,6 +108,12 @@ docker compose run --rm openclaw-cli channels login
 See [OpenClaw Discord docs](https://docs.openclaw.ai/channels/discord) for bot token, guild/channel restrictions, and configuration.
 
 **Telegram:** set `TELEGRAM_BOT_TOKEN` in the root `.env`; the gateway container receives it and the merge step can apply the same SecretRef pattern for `channels.telegram`. See upstream [Telegram channel docs](https://docs.openclaw.ai/channels/telegram).
+
+## Scheduled jobs (cron) and Discord
+
+If a **daily/hourly job** shows **`deliveryStatus: not-delivered`** but **`status: ok`**, the run may still have **posted to Discord** — OpenClaw’s cron hook does not always mark delivery for **isolated** sessions. **Check the channel first.**
+
+If nothing appears: look for **`⚠️ ✉️ Message failed`** (permissions, **2000-character** limit, rate limits) or **wrong `to`** on the **`message`** tool (`channel:<id>` form). See [TROUBLESHOOTING — OpenClaw cron + Discord](../docs/runbooks/TROUBLESHOOTING.md#openclaw-cron-jobs-and-discord-delivery).
 
 ## CLI Commands
 

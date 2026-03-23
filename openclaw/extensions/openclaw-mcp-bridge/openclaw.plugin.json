@@ -1,0 +1,52 @@
+{
+  "id": "openclaw-mcp-bridge",
+  "name": "openclaw-mcp-bridge",
+  "version": "0.2.0",
+  "label": "MCP Client",
+  "description": "Connect to remote MCP servers via Streamable HTTP with OAuth 2.1 auth",
+  "extensions": ["./dist/index.js"],
+  "slots": ["tool"],
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "servers": {
+        "type": "object",
+        "description": "Map of server name to server configuration",
+        "default": {},
+        "additionalProperties": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean", "default": true },
+            "url": { "type": "string", "description": "MCP server endpoint URL" },
+            "transport": { "type": "string", "enum": ["http", "stdio"], "default": "http" },
+            "command": { "type": "string" },
+            "args": { "type": "array", "items": { "type": "string" } },
+            "env": { "type": "object", "additionalProperties": { "type": "string" } },
+            "auth": {
+              "type": "object",
+              "properties": {
+                "clientId": { "type": "string" },
+                "clientSecret": { "type": "string" },
+                "authorizationServerUrl": { "type": "string" },
+                "scopes": { "type": "array", "items": { "type": "string" } }
+              }
+            },
+            "apiKey": { "type": "string" },
+            "toolPrefix": { "type": "string" },
+            "connectTimeoutMs": { "type": "number", "default": 10000 },
+            "requestTimeoutMs": { "type": "number", "default": 30000 }
+          },
+          "required": ["url"]
+        }
+      },
+      "toolDiscoveryInterval": { "type": "number", "default": 300000, "description": "Re-discover tools every N ms" },
+      "maxConcurrentServers": { "type": "number", "default": 20 },
+      "debug": { "type": "boolean", "default": false },
+      "injectSchemas": {
+        "type": "boolean",
+        "description": "Automatically inject MCP tool schemas into agent context",
+        "default": true
+      }
+    }
+  }
+}

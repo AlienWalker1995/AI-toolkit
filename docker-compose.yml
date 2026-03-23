@@ -466,6 +466,8 @@ services:
       - ${OPENCLAW_CONFIG_DIR:-${BASE_PATH:-.}/data/openclaw}:/config
       - openclaw-extensions:/extensions
       - ${BASE_PATH:-.}/openclaw/scripts:/scripts:ro
+      # Forked MCP bridge (namespaced tools as first-class OpenClaw tools); see openclaw/extensions/openclaw-mcp-bridge/README-AI-TOOLKIT.md
+      - ${BASE_PATH:-.}/openclaw/extensions/openclaw-mcp-bridge:/fork-openclaw-mcp-bridge:ro
     entrypoint: ["sh", "-c"]
     command:
       - |
@@ -474,8 +476,16 @@ services:
         MANIFEST="$$PLUGIN_DIR/openclaw.plugin.json"
         MCP_URL="$${MCP_GATEWAY_URL:-http://mcp-gateway:8811/mcp}"
 
-        # Install npm package if dist/ is missing
-        if [ ! -f "$$PLUGIN_DIR/dist/index.js" ]; then
+        # Prefer AI-toolkit fork (registers namespaced MCP tools); else npm pack upstream
+        if [ -f /fork-openclaw-mcp-bridge/dist/index.js ]; then
+          echo "Installing AI-toolkit forked openclaw-mcp-bridge from repo..."
+          rm -rf "$$PLUGIN_DIR"
+          mkdir -p "$$PLUGIN_DIR"
+          cp -a /fork-openclaw-mcp-bridge/. "$$PLUGIN_DIR/"
+          cd "$$PLUGIN_DIR"
+          npm install --omit=dev --ignore-scripts 2>&1
+          echo "Forked plugin installed."
+        elif [ ! -f "$$PLUGIN_DIR/dist/index.js" ]; then
           echo "Installing openclaw-mcp-bridge npm package..."
           apk add --no-cache git >/dev/null 2>&1 || true
           cd /tmp

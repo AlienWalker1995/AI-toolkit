@@ -2,6 +2,8 @@
 
 ## Quick Diagnostics
 
+**Windows + Git Bash:** `docker compose exec <service> cat /path/...` can break because MSYS turns `/home/...` into `C:/Program Files/Git/...`. Use **PowerShell**, **`cmd`**, or prefix: `MSYS_NO_PATHCONV=1 docker compose exec openclaw-gateway cat /home/node/.openclaw/openclaw.json`. Alternatively read the bind-mounted file on the host: `data/openclaw/openclaw.json`.
+
 ```bash
 # Service status
 docker compose ps
@@ -108,15 +110,32 @@ See [SECURITY_HARDENING.md](SECURITY_HARDENING.md) §11 (OpenClaw secrets).
 
 More detail: [openclaw/README.md](../../openclaw/README.md).
 
+### OpenClaw cron jobs and Discord delivery
+
+Symptoms in **job run history** or the Control UI often **do not match** what you see in Discord. Treat **Discord** as ground truth when they disagree.
+
+| Symptom | Likely meaning | What to do |
+|---|---|---|
+| `status: "ok"` but `deliveryStatus: "not-delivered"` (often with **`sessionTarget: "isolated"`**) | Cron run finished, but the **delivery hook** did not attach the final reply — can be a **tracking gap**, not “nothing posted”. | Check the **channel** for a new message. If the summary is there, ignore the flag. If not, see rows below. |
+| `error: "⚠️ ✉️ Message failed"` | **Discord API rejected** the `message` tool call (permissions, content rules, size, rate limit). | Confirm the bot has **Send Messages** (and **Embed Links** if you use links) in that channel. Shorten the post (Discord default **2000 characters** per message). Split into two messages if needed. |
+| `error: "Discord recipient is required…"` | The **`message`** tool was called **without** `to`, or with wrong shape. | Use **`to: "channel:<snowflake>"`** exactly (e.g. `channel:1483464800464797697`). Do not paste only the numeric ID. |
+| Agent says “search unavailable” / `Tool not found` for `gateway__duckduckgo__search` | With the **stock** npm bridge, that id was never registered (only `gateway__call`). This repo’s **forked** bridge registers namespaced tools — reinstall plugin per [openclaw/extensions/openclaw-mcp-bridge/README-AI-TOOLKIT.md](../../openclaw/extensions/openclaw-mcp-bridge/README-AI-TOOLKIT.md). Otherwise use **`gateway__call`** with **`tool: "duckduckgo__search"`**. |
+
+**Job payload tips (ai-daily-news style):**
+
+1. Require a **real `message` tool call** as the last step; **do not** rely on markdown “delivery notes” or code blocks — those are not Discord posts.
+2. If the model still skips `message`, tighten the job text: “You MUST call the message tool once with `to='channel:…'` and the full summary body.”
+3. For persistent **`not-delivered`** with no message in Discord, try changing the job’s **session target** in the OpenClaw UI (e.g. away from **isolated** if your version supports it) — see [OpenClaw docs](https://docs.openclaw.ai) for Jobs/scheduler.
+
 ### MCP tools — `Tool not found` / `Mcp-Session-Id` / `missing_brave_api_key`
 
-**`Tool not found` for names like `gateway__duckduckgo__search` or `gateway__comfyui__generate_image`:** Those are **not** real OpenClaw tool ids. The bridge exposes **`gateway__call`** and **`comfyui__call`** only; the MCP tool name (e.g. `duckduckgo__search`) goes in the **`tool`** field with **`args`**. See [openclaw/workspace/TOOLS.md.example](../../openclaw/workspace/TOOLS.md.example) §C and the **CRITICAL** section at the top.
+**`Tool not found` for names like `gateway__duckduckgo__search`:** On **upstream** `openclaw-mcp-bridge`, only **`gateway__call`** / **`comfyui__call`** exist at the top level; inner MCP names go in **`tool`** + **`args`**. This repo ships a **fork** ([`openclaw/extensions/openclaw-mcp-bridge`](../../openclaw/extensions/openclaw-mcp-bridge/README-AI-TOOLKIT.md)) that also registers each namespaced MCP tool as its own OpenClaw tool — run `docker compose run --rm openclaw-plugin-config` after pull, then restart **`openclaw-gateway`**. **`gateway__comfyui__generate_image`**-style names may still be wrong if ComfyUI uses a different inner tool id.
 
 **Same error for `gateway__n8n__workflow_list`:** Identical mistake — use **`gateway__call`** with inner `tool: "n8n__workflow_list"` (and valid n8n API auth if that tool requires it).
 
-**Not “MCP / DuckDuckGo disabled”:** If **`duckduckgo`** appears in **`data/mcp/servers.txt`** and **`mcp-gateway`** is healthy, the DuckDuckGo MCP server is in the stack. **`Tool not found`** on invented top-level names is almost always **wrong OpenClaw tool id**, not a missing server.
+**Not “MCP / DuckDuckGo disabled”:** If **`duckduckgo`** appears in **`data/mcp/servers.txt`** and **`mcp-gateway`** is healthy, the DuckDuckGo MCP server is in the stack.
 
-**Long `AGENTS.md` and bootstrap truncation:** OpenClaw may inject only the **first ~20 000 characters** of **`AGENTS.md`** into context (`workspace bootstrap file AGENTS.md … truncating` in gateway logs). Avoid misleading shorthand like **`gateway__n8n_*`** / **`gateway__playwright_*`** as if they were tool names — models often expand those to invalid **`gateway__n8n__workflow_list`**-style ids. Keep the **CRITICAL** naming rules (only **`gateway__call`** / **`comfyui__call`**) in the **first** section of a long AGENTS file, or rely on **`TOOLS.md`** (shorter) for the contract.
+**Long `AGENTS.md` and bootstrap truncation:** OpenClaw may inject only the **first ~20 000 characters** of **`AGENTS.md`**. Put MCP invocation rules early, or rely on **`TOOLS.md`** (shorter) for the contract.
 
 If **`data/openclaw/workspace/TOOLS.md`** is an old short stub: **`openclaw-workspace-sync`** (and **`scripts/fix_openclaw_workspace_permissions`**) now **replace** it with **`TOOLS.md.example`** when the file lacks the current contract marker (`gateway__duckduckgo__search`). Set **`OPENCLAW_SKIP_TOOLS_MD_UPGRADE=1`** in `.env` to disable this. You can also run **`openclaw/scripts/upgrade_tools_md_from_example.ps1`** (Windows) or **`.sh`** (Linux/Mac) from the repo.
 

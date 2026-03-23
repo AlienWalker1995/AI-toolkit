@@ -29,7 +29,11 @@ No GPU required for chat (Ollama runs on CPU, slower but works).
 
 Alternatively: `docker compose up -d` — same services without the full bootstrap/rebuild step (use the `compose` wrapper if you want auto hardware detection).
 
-**OpenClaw Control UI:** `http://localhost:6680/?token=<OPENCLAW_GATEWAY_TOKEN>`. **Not** `:6682` — that mapped port is the browser/CDP bridge only, not the main UI. If `docker compose` fails on OpenClaw services, see [TROUBLESHOOTING — OpenClaw](runbooks/TROUBLESHOOTING.md#openclaw) for log commands.
+**OpenClaw Control UI:** `http://localhost:6680/?token=<OPENCLAW_GATEWAY_TOKEN>`.
+
+**Important:** Use `OPENCLAW_GATEWAY_TOKEN` (not `DASHBOARD_AUTH_TOKEN`) for OpenClaw authentication. See [configuration.md](configuration.md) for the full environment variable reference.
+
+**Note on ports:** Port `:6680` is the main OpenClaw Control UI. Port `:6682` is the browser/CDP bridge only (used internally, not the main UI). If `docker compose` fails on OpenClaw services, see [TROUBLESHOOTING — OpenClaw](runbooks/TROUBLESHOOTING.md#openclaw) for log commands.
 
 ### RAG (documents in chat)
 
@@ -79,6 +83,9 @@ Traffic is encrypted by Tailscale (WireGuard). No TLS at the app layer needed fo
 
 ## Next steps
 
+- [Configuration](configuration.md) — environment variables and OpenClaw workspace setup
+- [Docker Runtime](docker-runtime.md) — core workspace, volumes, and image details
+- [Data](data.md) — data schemas, lifecycle, and persistence rules
 - [Architecture & PRD](Product%20Requirements%20Document.md) — platform design and components
 - [Troubleshooting](runbooks/TROUBLESHOOTING.md) — common issues and fixes
 - [MCP Gateway](../mcp/README.md) — web search, GitHub, etc.
