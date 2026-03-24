@@ -2,6 +2,7 @@
 # Wrapper that runs MCP gateway and reloads when config changes (no container restart).
 # Reads servers from /mcp-config/servers.txt (comma-separated).
 # When servers.txt is empty and registry.json exists, seeds from registry server keys.
+# Repo copy: mcp/gateway/gateway-wrapper.sh (image: mcp/Dockerfile).
 
 CONFIG_FILE="${MCP_CONFIG_FILE:-/mcp-config/servers.txt}"
 REGISTRY_FILE="$(dirname "$CONFIG_FILE")/registry.json"

@@ -4,7 +4,23 @@ All notable changes to this project are documented here. The format is loosely b
 
 ## [Unreleased]
 
+### Fixed
+
+- **Model Gateway:** `GET /v1/models` no longer lists each Ollama model twice (`name` and `ollama/name`). Only the canonical id is returned (same id the gateway forwards to Ollama), so Open WebUI / OpenClaw pickers do not show duplicate HF models.
+
+- **Model Gateway:** Stopped appending placeholder `claude-sonnet-*` model ids to `GET /v1/models` whenever `CLAUDE_CODE_LOCAL_MODEL` was set — they polluted Open WebUI / OpenClaw “active models.” Remapping in `/v1/messages` is unchanged. Opt back in with **`CLAUDE_CODE_ADVERTISE_ALIASES=1`** in `.env` if a client strictly validates the model list.
+
 ### Added
+
+- **Docs — MCP hardening + OpenClaw operations:** [`mcp/docs/openclaw-hardening-and-operations.md`](mcp/docs/openclaw-hardening-and-operations.md) — defense-in-depth vs forked bridge; two-layer model (MCP gateway vs dashboard/ops-controller); ComfyUI workflows/models/nodes/monitoring; optional future “dashboard MCP adapter.”
+
+- **MCP module layout:** Gateway templates (`gateway-wrapper.sh`, `registry-custom.yaml`) moved under **`mcp/gateway/`**; ComfyUI/OpenClaw architecture doc moved to **`mcp/docs/comfyui-openclaw.md`** (`docs/architecture/comfyui-openclaw-mcp.md` is a redirect). **`openclaw/openclaw.json.example`** documents **`plugins.entries.openclaw-mcp-bridge`** with a single **`servers.gateway`** URL for the Docker MCP Gateway.
+
+- **Docs — automated social/video pipeline:** [`docs/architecture/automated-social-content-pipeline.md`](docs/architecture/automated-social-content-pipeline.md) — target end state (generate → normalize → publish → observe) and how OpenClaw, MCP, ComfyUI, n8n, and the dashboard fit together.
+
+- **Docs — OpenClaw ↔ ComfyUI vs n8n (merged):** [`docs/architecture/comfyui-openclaw-mcp.md`](docs/architecture/comfyui-openclaw-mcp.md) — reliability (`gateway__call`, flat tools), n8n-style parity matrix, optional ComfyUI-OpenClaw note. Supersedes the split **`mcp-comfyui-reliability`** / **`openclaw-comfyui-n8n-parity`** docs. **`TOOLS.md`** / **`comfyui-assets.md`** updated so agents treat ComfyUI like n8n through the **same MCP gateway**.
+
+- **ComfyUI — local Primus workflows:** [`data/comfyui-workflows/local-primus-replacements/`](data/comfyui-workflows/local-primus-replacements/) — checkpoint-only T2I (`primus_ai_image_local_flux.json`, `PARAM_*` for MCP) and LTX notes (`primus_local_video_ltx_notes.txt`). Docs/agent notes emphasize **local checkpoints** first; Juno pack README rewritten **local-first**. Mirror JSON under [`workflow-templates/comfyui-workflows/local-primus-replacements/`](workflow-templates/comfyui-workflows/local-primus-replacements/).
 
 - **ComfyUI MCP — stack management tools:** **`comfyui-mcp/tools/management.py`** registers **`install_custom_node_requirements`** and **`restart_comfyui`** (HTTP to ops-controller). **`comfyui-mcp/Dockerfile`** patches upstream **`server.py`** to load them. **`docker-compose`** passes **`OPS_CONTROLLER_URL`** / **`OPS_CONTROLLER_TOKEN`** into **`comfyui-mcp`** and **`mcp-gateway`**. **`mcp/registry-custom.yaml`** + **`gateway-wrapper.sh`** substitute **`PLACEHOLDER_OPS_CONTROLLER_TOKEN`** at gateway startup for spawned ComfyUI MCP containers. **TOOLS.md** / **comfyui-assets** / **TROUBLESHOOTING** document **`gateway__call`** + inner tool names (same paradigm as n8n).
 
@@ -17,7 +33,19 @@ All notable changes to this project are documented here. The format is loosely b
 - **OpenClaw channel secrets:** `merge_gateway_config.py` rewrites Discord and Telegram bot tokens to OpenClaw SecretRef form when `DISCORD_TOKEN` / `DISCORD_BOT_TOKEN` or `TELEGRAM_BOT_TOKEN` is set in `.env`, so tokens need not live as plaintext in `openclaw.json`. `openclaw-gateway` receives `TELEGRAM_BOT_TOKEN` from the environment.
 - **Housekeeping:** This changelog; PRD milestone updates for M6 (partial, non-auth) and resolved open questions where features already exist (CI, audit rotation, M7 spine).
 
+### Fixed
+
+- **openclaw-mcp-bridge (fork):** **`registerFlatMcpTools`** no longer marks registration “done” when **zero** MCP tools were discovered (e.g. **mcp-gateway** still starting). Retries on **`session_start`** up to **12** attempts, then logs and stops. Reduces **`Tool not found` for `gateway__comfyui__run_workflow`** when flat tools never registered.
+
 ### Changed
+
+- **Docs — architecture:** Index at [`docs/architecture/README.md`](docs/architecture/README.md). Removed **`mcp-comfyui-reliability.md`** and **`openclaw-comfyui-n8n-parity.md`** in favor of **`comfyui-openclaw-mcp.md`** — why the stack feels brittle, **`gateway__call`** vs flat tools, Dashboard/n8n alternatives, and the parity matrix.
+
+- **MCP — ComfyUI via gateway only:** Dashboard **`MCP_GATEWAY_SERVERS`** default in **`docker-compose.yml`** now includes **`comfyui`** (with duckduckgo, n8n, playwright) so new installs do not seed **`servers.txt`** with DuckDuckGo-only. **`openclaw-gateway`** no longer **`depends_on`** **`comfyui-mcp`** — OpenClaw uses **`http://mcp-gateway:8811/mcp`** only. **`TOOLS.md`** / **`.example`**, **`TROUBLESHOOTING`**, **`mcp/README.md`**, **`docs/docker-runtime.md`**, **`comfyui-assets.md`**: document valid **`gateway__comfyui__*`** tool names; **`gateway__run_workflow`** is invalid.
+
+- **Primus local workflows:** [`local-primus-replacements/README.md`](data/comfyui-workflows/local-primus-replacements/README.md) and [`primus_local_video_ltx_notes.txt`](data/comfyui-workflows/local-primus-replacements/primus_local_video_ltx_notes.txt) drop cloud-model framing; removed `primus_veo3_video_local_ltx_placeholder.txt`. Juno pack [`README.md`](data/comfyui-workflows/juno-comfyui-workflows-main/juno-comfyui-workflows-main/README.md) leads with **local-first** paths. **`TOOLS.md`** / **`AGENTS.md`** (and **`.example`**) + **`comfyui-assets.md`** use **checkpoint vs proxy** language without naming non-local products.
+
+- **OpenClaw workspace:** **`AGENTS.md`**, **`TOOLS.md`**, **`workspace/agents/comfyui-assets.md`** (and **`.example`** templates) distinguish **checkpoint pulls** (`models/`) from **proxy-only** Juno graphs — avoids bogus “model download” heartbeats for HTTP-only paths. **`local-primus-replacements/README.md`** is **local-first** (checkpoints only).
 
 - **ComfyUI MCP `workflow_manager`:** Skips UI/editor workflow exports and ignores non-dict top-level keys when scanning `*.json`, so stray metadata files (e.g. `id`/`name` stubs) or Juno UI JSON under `data/comfyui-workflows/` no longer crash server startup.
 

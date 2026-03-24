@@ -1300,13 +1300,15 @@ async def get_default_model(request: Request):
 @app.post("/api/config/default-model")
 async def set_default_model(req: DefaultModelRequest, request: Request):
     """Write DEFAULT_MODEL to .env and recreate open-webui so the change takes effect."""
-    if not req.model or "/" in req.model.replace(":", ""):
+    # Ollama allows namespaced ids: owner/model:tag (slashes required). Only reject empty / traversal.
+    name = (req.model or "").strip()
+    if not name or ".." in name:
         raise HTTPException(status_code=400, detail="Invalid model name")
 
     # 1. Write to .env
     code, data = await _ops_request(
         "POST", "/env/set", request=request,
-        json={"key": "DEFAULT_MODEL", "value": req.model, "confirm": True},
+        json={"key": "DEFAULT_MODEL", "value": name, "confirm": True},
     )
     if code >= 400:
         raise HTTPException(status_code=502, detail=f"env/set failed: {data.get('detail', data)}")
@@ -1323,7 +1325,7 @@ async def set_default_model(req: DefaultModelRequest, request: Request):
 
     return {
         "ok": code2 in (200, 201),
-        "model": req.model,
+        "model": name,
         "webui_recreated": code2 in (200, 201),
         "openclaw_restarted": code3 in (200, 201),
         "webui_error": data2.get("detail") if code2 >= 400 else None,

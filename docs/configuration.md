@@ -102,6 +102,8 @@ docker compose up -d openclaw-gateway
 
 ## MCP Server Configuration
 
+Repo templates live under **`mcp/gateway/`** and **`mcp/docs/`**; runtime files are in **`data/mcp/`** (bind-mounted into the gateway). See [mcp/README.md](../mcp/README.md).
+
 MCP servers are configured in `data/mcp/servers.txt` (one server per line) and `data/mcp/registry.json` (metadata, allow_clients, rate limits).
 
 Default MCP servers: `n8n`, `playwright`, `comfyui`

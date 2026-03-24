@@ -265,6 +265,20 @@ def main() -> int:
             control_ui["allowedOrigins"] = sorted(required_origins | existing)
             modified = True
 
+    # Docker image: gateway binary is baked in — Control UI "Update" (npm/git) cannot replace it and often stalls.
+    # Disable in-app update checks/auto-apply unless opted in via OPENCLAW_ALLOW_IN_APP_UPDATE=1.
+    # Upgrade OpenClaw: docker compose pull && docker compose up -d openclaw-gateway (see openclaw/README.md).
+    if os.environ.get("OPENCLAW_ALLOW_IN_APP_UPDATE", "").strip() != "1":
+        upd = data.setdefault("update", {})
+        if isinstance(upd, dict):
+            if upd.get("checkOnStart") is not False:
+                upd["checkOnStart"] = False
+                modified = True
+            auto = upd.setdefault("auto", {})
+            if isinstance(auto, dict) and auto.get("enabled") is not False:
+                auto["enabled"] = False
+                modified = True
+
     if not modified:
         return 0
     try:

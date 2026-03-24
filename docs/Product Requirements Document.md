@@ -483,7 +483,7 @@ services:
 **Status: ✅ Complete (M3 + M5)**
 
 **What's implemented:**
-- MCP Gateway reads `servers.txt` (10s hot-reload); `mcp/gateway-wrapper.sh` manages startup
+- MCP Gateway reads `servers.txt` (10s hot-reload); `mcp/gateway/gateway-wrapper.sh` manages startup
 - Dashboard reads `servers.txt` (enabled list) and `registry.json` (metadata) to produce enriched tool view
 - `GET /api/mcp/servers` — returns `{enabled, catalog, dynamic, registry}`
 - `GET /api/mcp/health` — probes each enabled server against MCP gateway; returns `{ok, checked_at}` per server
@@ -690,7 +690,7 @@ LLM-toolkit/
 ├── dashboard/           ✓ exists
 ├── model-gateway/       ✓ exists
 ├── ops-controller/      ✓ exists
-├── mcp/                 ✓ (Dockerfile, gateway-wrapper.sh, registry.json.example, README.md)
+├── mcp/                 ✓ (Dockerfile, gateway/, docs/, README.md)
 ├── openclaw/            ✓ (workspace/, scripts/, openclaw.json.example)
 ├── rag-ingestion/       ✓ (Dockerfile, ingest.py, requirements.txt)
 ├── scripts/             ✓ (detect_hardware.py, ssrf-egress-block.sh/.ps1, mcp_add/remove.sh/.ps1, smoke_test.sh/.ps1, comfyui/)

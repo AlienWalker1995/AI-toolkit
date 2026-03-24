@@ -2,6 +2,22 @@
 
 The [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) lets AI applications connect to external tools and data. This module runs Docker's [MCP Gateway](https://github.com/docker/mcp-gateway), giving all your AI-toolkit services access to the same MCP servers through one endpoint.
 
+## Layout (everything MCP lives under `mcp/`)
+
+| Path | Role |
+|------|------|
+| **[gateway/](gateway/)** | Image entrypoint (`gateway-wrapper.sh`) and **template** `registry-custom.yaml` (ComfyUI custom catalog). `ensure_dirs` copies the registry into **`data/mcp/`**; the running gateway reads **`data/mcp/`** via the compose bind mount. |
+| **[docs/](docs/)** | MCP-specific architecture (e.g. [ComfyUI + OpenClaw](docs/comfyui-openclaw.md)). |
+| **`Dockerfile`** | Builds `ai-toolkit-mcp-gateway` from `docker/mcp-gateway` + the wrapper above. |
+
+**Runtime state** (not in git): **`data/mcp/`** — `servers.txt`, `registry-custom.yaml` (from template), generated `registry-custom.docker.yaml`, optional `registry.json` for policy metadata.
+
+**OpenClaw:** Use **one** MCP URL for every catalog server — **`plugins.entries["openclaw-mcp-bridge"].config.servers.gateway.url`** → `http://mcp-gateway:8811/mcp`. Do not add separate `servers.comfyui` / per-server URLs; the Docker MCP Gateway aggregates DuckDuckGo, n8n, Playwright, ComfyUI, etc.
+
+### Hardening + operating the full stack from OpenClaw
+
+Security is **network + secrets + policy + host egress** — the forked bridge does not replace that. **Managing** models, nodes, workflows, and MCP servers uses **two layers**: MCP tools on **`mcp-gateway:8811`** for day‑to‑day tool calls, and **authenticated dashboard / ops-controller HTTP** (via **`DASHBOARD_AUTH_TOKEN`** / **`OPS_CONTROLLER_TOKEN`**) for privileged infra. See **[mcp/docs/openclaw-hardening-and-operations.md](docs/openclaw-hardening-and-operations.md)** for the full picture and checklists.
+
 ## Best experience: Docker Desktop MCP Toolkit
 
 If you use **Docker Desktop 4.42+** with the [MCP Toolkit](https://docs.docker.com/ai/mcp-catalog-and-toolkit/toolkit/) enabled, you get the full Docker MCP experience:
@@ -46,7 +62,7 @@ The scripts update the config file and the gateway reloads automatically.
 |--------|---------|
 | `n8n` | Workflow automation. Set `N8N_API_KEY` in `.env` for full access. |
 | `playwright` | **Preferred browser tool** — navigate, screenshot, click, fill forms. |
-| `comfyui` | Image/audio/video generation via ComfyUI (custom registry). Also exposes **`install_custom_node_requirements`** and **`restart_comfyui`** (ops-controller) when **`OPS_CONTROLLER_TOKEN`** is set — see **`mcp/registry-custom.yaml`** and **`gateway-wrapper.sh`**. |
+| `comfyui` | Image/audio/video via ComfyUI (custom registry). **`list_workflows`**, **`run_workflow`**, per-workflow tools, **`install_custom_node_requirements`**, **`restart_comfyui`**. OpenClaw + n8n parity: [**mcp/docs/comfyui-openclaw.md**](docs/comfyui-openclaw.md). Registry template: **`mcp/gateway/registry-custom.yaml`**; entrypoint: **`mcp/gateway/gateway-wrapper.sh`**. |
 
 ### Other catalog servers
 
@@ -88,6 +104,8 @@ Use the built-in **MCP Client Tool** node in your AI agent workflows:
 See [n8n MCP Client Tool docs](https://docs.n8n.io/integrations/builtin/cluster-nodes/sub-nodes/n8n-nodes-langchain.toolmcp/).
 
 ### OpenClaw
+
+**ComfyUI tools are not a separate MCP server.** They are registered on **`mcp-gateway:8811`** (via the `comfyui` catalog server + `registry-custom.yaml`). The OpenClaw plugin uses **one** URL — the gateway. Flat tools like **`gateway__comfyui__…`** depend on **tool discovery timing**; **`gateway__call`** always works once the gateway responds. See [**mcp/docs/comfyui-openclaw.md**](docs/comfyui-openclaw.md).
 
 Many OpenClaw builds (e.g. 2026.2.x from `ghcr.io/phioranex/openclaw-docker`) **do not accept a top-level `mcp` key** in `openclaw.json`. Use the **openclaw-mcp-bridge** plugin instead.
 

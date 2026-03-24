@@ -49,7 +49,7 @@ if (-not (Test-Path $mcpServers)) {
     Write-Host "OK $mcpServers (n8n,playwright,comfyui,duckduckgo)"
 }
 # Bootstrap custom registry for ComfyUI (gateway uses --additional-registry)
-$registryTemplate = Join-Path $base "mcp\registry-custom.yaml"
+$registryTemplate = Join-Path $base "mcp\gateway\registry-custom.yaml"
 if (-not (Test-Path $mcpRegistry) -and (Test-Path $registryTemplate)) {
     Copy-Item $registryTemplate $mcpRegistry -Force
     Write-Host "OK $mcpRegistry"

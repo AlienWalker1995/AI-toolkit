@@ -341,8 +341,9 @@ def main() -> int:
             "comfyui": {
                 "image": "yanwk/comfyui-boot:cu128-slim",
                 "environment": {
-                    "CLI_ARGS": "--disable-xformers --lowvram",
+                    "CLI_ARGS": "--disable-xformers --lowvram --enable-manager",
                     "PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:True,pinned_use_cuda_host_register:True",
+                    "HF_TOKEN": "${HF_TOKEN:-}",
                 },
                 "deploy": {
                     "resources": {
@@ -361,7 +362,10 @@ def main() -> int:
             },
             "comfyui": {
                 "image": "yanwk/comfyui-boot:rocm",
-                "environment": {"CLI_ARGS": "--disable-xformers --lowvram"},
+                "environment": {
+                    "CLI_ARGS": "--disable-xformers --lowvram --enable-manager",
+                    "HF_TOKEN": "${HF_TOKEN:-}",
+                },
                 "deploy": {"resources": {"limits": {"memory": comfyui_mem}}},
                 "devices": ["/dev/kfd", "/dev/dri"],
                 "security_opt": ["seccomp:unconfined"],
@@ -373,7 +377,10 @@ def main() -> int:
             },
             "comfyui": {
                 "image": "yanwk/comfyui-boot:xpu",
-                "environment": {"CLI_ARGS": "--disable-xformers --lowvram"},
+                "environment": {
+                    "CLI_ARGS": "--disable-xformers --lowvram --enable-manager",
+                    "HF_TOKEN": "${HF_TOKEN:-}",
+                },
                 "deploy": {"resources": {"limits": {"memory": comfyui_mem}}},
                 "devices": ["/dev/dri"],
             },
@@ -385,7 +392,10 @@ def main() -> int:
             "comfyui": {
                 "image": "thiagoin/comfyui:arm64",
                 "platform": "linux/arm64",
-                "environment": {"CLI_ARGS": "--cpu"},
+                "environment": {
+                    "CLI_ARGS": "--cpu --enable-manager",
+                    "HF_TOKEN": "${HF_TOKEN:-}",
+                },
                 "deploy": {"resources": {"limits": {"memory": comfyui_mem}}},
             },
         },
@@ -395,7 +405,10 @@ def main() -> int:
             },
             "comfyui": {
                 "image": "yanwk/comfyui-boot:cpu",
-                "environment": {"CLI_ARGS": "--cpu"},
+                "environment": {
+                    "CLI_ARGS": "--cpu --enable-manager",
+                    "HF_TOKEN": "${HF_TOKEN:-}",
+                },
                 "deploy": {"resources": {"limits": {"memory": comfyui_mem}}},
             },
         },

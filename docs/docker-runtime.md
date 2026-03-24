@@ -41,9 +41,8 @@ These files are **persistent** — they survive container restarts because they 
 | dashboard | `models/comfyui/` | `/models/comfyui/` | bind mount | ComfyUI model weights |
 | ops-controller | `data/ops-controller/` | `/data/` | bind mount | Audit log (append-only) |
 | ops-controller | `models/comfyui/` | `/models/comfyui/` | bind mount | ComfyUI model weights |
-| mcp-gateway | `data/mcp/` | `/mcp-config/` | bind mount | Server registry |
+| mcp-gateway | `data/mcp/` | `/mcp-config/` | bind mount | Server registry (templates in repo: `mcp/gateway/`) |
 | openclaw-gateway | `data/openclaw/` | `/home/node/.openclaw/` | bind mount | Full OpenClaw workspace |
-| openclaw-gateway | `data/comfyui-storage/ComfyUI/custom_nodes/` | `/home/node/.openclaw/workspace/comfyui-custom-nodes` | bind mount | Same folder as ComfyUI `custom_nodes` (agents install LTX/Juno nodes here) |
 | openclaw-gateway | — | `/home/node/.openclaw/extensions/` | named volume (`openclaw-extensions`) | Plugin extensions |
 | qdrant | `data/qdrant/` | `/qdrant/storage/` | bind mount | Vector DB storage |
 | rag-ingestion | `data/rag-input/` | `/watch/` | bind mount | RAG input files |
@@ -144,7 +143,6 @@ docker compose -f docker-compose.yml -f overrides/mcp-expose.yml up -d
 | openclaw-gateway | openclaw-config-sync | `service_completed_successfully` |
 | openclaw-gateway | openclaw-plugin-config | `service_completed_successfully` |
 | openclaw-gateway | model-gateway | `service_started` |
-| openclaw-gateway | comfyui-mcp | `service_started` |
 | openclaw-gateway | mcp-gateway | `service_started` |
 
 ## Security Hardening

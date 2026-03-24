@@ -1,5 +1,5 @@
-# Re-run openclaw-workspace-sync so workspace files are owned by uid 1000 (node in openclaw-gateway).
-# Use when MEMORY.md or other workspace *.md returns EACCES inside the gateway.
+# Re-run openclaw-workspace-sync so data/openclaw is owned by uid 1000 (node in openclaw-gateway).
+# Use when MEMORY.md, agents/*/models.json, or other paths under data/openclaw return EACCES.
 # Requires: Docker, compose file from repo root, BASE_PATH if not cwd.
 $ErrorActionPreference = "Stop"
 $base = if ($env:BASE_PATH) { $env:BASE_PATH } else { (Get-Location).Path }

@@ -13,8 +13,6 @@ Core behavior, priorities, and response style for this workspace.
 - Confirm once before destructive or irreversible actions.
 - Keep credentials and tokens in this controller; do not pass them to browser workers or untrusted surfaces.
 - For scheduled channel work, treat the **target channel’s messages** as the record of what was delivered.
-- For specialized modes, read `workspace/agents/<role>.md` for that task only, then return to default behavior (e.g. ComfyUI nodes / no-Docker constraints: **`comfyui-assets.md`**).
+- For specialized modes, read `workspace/agents/<role>.md` for that task only, then return to default behavior.
 
 Tool names, service URLs, and MCP shapes: **`TOOLS.md`** only.
-
-- **ComfyUI custom nodes:** Only **`workspace/comfyui-custom-nodes/`** (shared with the **`comfyui`** service). Never install under **`/app/ComfyUI`** on the gateway. Do not try **`docker`**, **`docker exec`**, or invented tools like **`gateway__run_command`** for ComfyUI — read **`workspace/agents/comfyui-assets.md`**; service restarts: **`docker-ops.md`**.

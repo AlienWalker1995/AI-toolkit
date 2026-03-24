@@ -25,7 +25,7 @@ def _ops_post(path: str, body: Dict[str, Any], timeout: int = 600) -> dict:
             "ok": False,
             "error": (
                 "OPS_CONTROLLER_TOKEN is not set on the ComfyUI MCP server. "
-                "Set it in .env and pass it through mcp/registry-custom.yaml (and mcp-gateway env) "
+                "Set it in .env and pass it through mcp/gateway/registry-custom.yaml (and mcp-gateway env) "
                 "so spawned MCP containers can reach ops-controller."
             ),
         }

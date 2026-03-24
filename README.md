@@ -20,7 +20,7 @@ Docker Compose stack for local LLMs, chat UI, image/video (ComfyUI), automation 
 
 **Who it is for:** Operators running the stack on their own machine or LAN; contributors changing Python services, tests, and Compose definitions.
 
-**Docs:** [Getting started](docs/GETTING_STARTED.md) · [Configuration](docs/configuration.md) · [Docker runtime](docs/docker-runtime.md) · [Data](docs/data.md) · [Troubleshooting](docs/runbooks/TROUBLESHOOTING.md) · [Architecture / PRD](docs/Product%20Requirements%20Document.md)
+**Docs:** [Getting started](docs/GETTING_STARTED.md) · [Configuration](docs/configuration.md) · [Docker runtime](docs/docker-runtime.md) · [Data](docs/data.md) · [Troubleshooting](docs/runbooks/TROUBLESHOOTING.md) · [Architecture index](docs/architecture/README.md) · [PRD](docs/Product%20Requirements%20Document.md)
 
 ## Features
 
@@ -122,7 +122,7 @@ Auto-generated: **`overrides/compute.yml`** (from hardware detection). Do not co
 
 ### Dashboard
 
-The dashboard at [http://localhost:8080](http://localhost:8080) lists models (Ollama and ComfyUI), links to other services, dependency health, and searchable model pulls. With **`OPS_CONTROLLER_TOKEN`** set, it can restart services and trigger ComfyUI custom-node installs via **`POST /api/comfyui/install-node-requirements`** (proxied to ops-controller; OpenClaw may use **`DASHBOARD_AUTH_TOKEN`** — see [`openclaw/workspace/agents/comfyui-assets.md`](openclaw/workspace/agents/comfyui-assets.md)).
+The dashboard at [http://localhost:8080](http://localhost:8080) lists models (Ollama and ComfyUI), links to other services, dependency health, and searchable model pulls. With **`OPS_CONTROLLER_TOKEN`** set, it can restart services and run **`POST /api/comfyui/install-node-requirements`** (proxied to ops-controller; use **`DASHBOARD_AUTH_TOKEN`** as in **TROUBLESHOOTING**).
 
 After code changes affecting the dashboard image: `.\compose.ps1 build dashboard` then `.\compose.ps1 up -d` (or `./compose` equivalents).
 

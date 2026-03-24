@@ -1,5 +1,6 @@
 # Custom MCP registry — ComfyUI (not in Docker MCP catalog).
-# Copied to data/mcp/ by ensure_dirs. Gateway uses --additional-registry to load it.
+# Template: mcp/gateway/registry-custom.yaml — copied to data/mcp/ by ensure_dirs.
+# Gateway uses --additional-registry to load it.
 # ComfyUI MCP uses stdio (see comfyui-mcp/Dockerfile CMD) so the gateway can communicate.
 # PLACEHOLDER_OPS_CONTROLLER_TOKEN is replaced at gateway startup from mcp-gateway env (see gateway-wrapper.sh).
 servers:

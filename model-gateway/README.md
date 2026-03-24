@@ -6,7 +6,7 @@ OpenAI-compatible proxy for unified model access. Routes chat and embedding requ
 
 ## Endpoints
 
-- `GET /v1/models` — List models from all providers
+- `GET /v1/models` — List models from all providers (one id per Ollama model — bare name as in `ollama list`, e.g. `hf.co/org/model:tag`, not a second `ollama/...` copy)
 - `POST /v1/chat/completions` — Chat completion (streaming supported)
 - `POST /v1/messages` — Anthropic Messages API (Claude Code compatibility)
 - `POST /v1/embeddings` — Embeddings
@@ -20,6 +20,7 @@ OpenAI-compatible proxy for unified model access. Routes chat and embedding requ
 | `VLLM_URL` | Optional vLLM backend URL |
 | `DEFAULT_PROVIDER` | Default provider when no prefix (default: `ollama`) |
 | `CLAUDE_CODE_LOCAL_MODEL` | Default local model for Claude Code `claude-*` remapping (e.g. `glm-4.7-flash:Q4_K_M`) |
+| `CLAUDE_CODE_ADVERTISE_ALIASES` | Set to `1` only if a client **requires** synthetic `claude-*` ids in `GET /v1/models`. **Default off** — remapping in `/v1/messages` still works without this; leaving it off avoids fake “Sonnet” models appearing in Open WebUI / OpenClaw sync. |
 | `OLLAMA_NUM_CTX` | KV cache context cap (default: `16384`, `0` = model max) |
 | `MODEL_CACHE_TTL_SEC` | Model list cache TTL (default: `60`) |
 
@@ -104,6 +105,8 @@ curl http://<gateway-host-ip>:11435/health
 5. The response is translated back to Anthropic format
 
 Claude Code doesn't know it's talking to a local model — the gateway is a transparent proxy.
+
+`GET /v1/models` lists **real** Ollama (and optional vLLM) models only, unless you set **`CLAUDE_CODE_ADVERTISE_ALIASES=1`**. Older versions always appended placeholder `claude-sonnet-*` ids when `CLAUDE_CODE_LOCAL_MODEL` was set, which confused OpenClaw’s “active models” list — that is now opt-in.
 
 ### Changing the default model
 

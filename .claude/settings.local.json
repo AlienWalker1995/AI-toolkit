@@ -8,7 +8,14 @@
       "Bash(./compose build:*)",
       "Bash(./compose up:*)",
       "Bash(./compose exec:*)",
-      "Bash(docker compose:*)"
+      "Bash(docker compose:*)",
+      "Bash(for dir:*)",
+      "Bash(do mkdir:*)",
+      "Bash(mv \"$dir\"/* \"/tmp/juno-move/$dir/\")",
+      "Bash(done)",
+      "Bash(mv /tmp/juno-move/* .)",
+      "Bash(curl -s http://localhost:8188/object_info)",
+      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\(''''\\\\n''''.join\\(sorted\\(d.keys\\(\\)\\)[:50]\\)\\)\")"
     ]
   }
 }

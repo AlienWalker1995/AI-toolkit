@@ -52,6 +52,8 @@ services:
       - OLLAMA_NUM_CTX=${OLLAMA_NUM_CTX:-16384}
       # Local model used when Claude Code sends a "claude-*" model name
       - CLAUDE_CODE_LOCAL_MODEL=${CLAUDE_CODE_LOCAL_MODEL:-}
+      # Set to 1 only if a client requires claude-* ids in GET /v1/models (pollutes OpenClaw sync if on)
+      - CLAUDE_CODE_ADVERTISE_ALIASES=${CLAUDE_CODE_ADVERTISE_ALIASES:-0}
     ports:
       - "${MODEL_GATEWAY_PORT:-11435}:11435"
     healthcheck:
@@ -135,7 +137,8 @@ services:
       - SCRIPTS_DIR=/scripts
       - MCP_CONFIG_PATH=/mcp-config/servers.txt
       - MCP_GATEWAY_URL=http://mcp-gateway:8811
-      - MCP_GATEWAY_SERVERS=${MCP_GATEWAY_SERVERS:-duckduckgo}
+      # Must include comfyui so mcp-gateway loads ComfyUI tools (registry-custom.yaml). Matches data/mcp/servers.txt default.
+      - MCP_GATEWAY_SERVERS=${MCP_GATEWAY_SERVERS:-duckduckgo,n8n,playwright,comfyui}
       - OPS_CONTROLLER_URL=http://ops-controller:9000
       - OPS_CONTROLLER_TOKEN=${OPS_CONTROLLER_TOKEN:-}
       - DASHBOARD_AUTH_TOKEN=${DASHBOARD_AUTH_TOKEN:-}
@@ -259,8 +262,11 @@ services:
         max-size: "10m"
         max-file: "3"
     environment:
-      - CLI_ARGS=--cpu
+      # --enable-manager: ComfyUI-Manager (node installs, model UI) — see docs.comfy.org/manager/install
+      - CLI_ARGS=--cpu --enable-manager
       - PYTORCH_CUDA_ALLOC_CONF=
+      # Hugging Face downloads (gated models) from Manager or built-in fetchers
+      - HF_TOKEN=${HF_TOKEN:-}
     volumes:
       - ${BASE_PATH:-.}/data/comfyui-storage:/root
       - ${BASE_PATH:-.}/models/comfyui:/root/ComfyUI/models
@@ -279,7 +285,7 @@ services:
     restart: "no"
     command: ["true"]
 
-  # Standalone ComfyUI MCP server — OpenClaw connects directly (gateway doesn't load custom registry)
+  # Long-running ComfyUI MCP (same image as gateway-spawned). OpenClaw uses **mcp-gateway:8811** only — see TOOLS.md.
   comfyui-mcp:
     image: ai-toolkit-comfyui-mcp:latest
     pull_policy: build
@@ -396,6 +402,8 @@ services:
     volumes:
       - ${BASE_PATH:-.}/openclaw/workspace:/templates:ro
       - ${OPENCLAW_WORKSPACE_DIR:-${BASE_PATH:-.}/data/openclaw/workspace}:/workspace
+      # Full config tree so we can chown agents/, canvas/, etc. (gateway runs as uid 1000)
+      - ${OPENCLAW_CONFIG_DIR:-${BASE_PATH:-.}/data/openclaw}:/openclaw-config
       - ${BASE_PATH:-.}/openclaw/scripts/workspace_sync_upgrade_tools.sh:/upgrade-tools.sh:ro
     # Markdown: copy only if missing (preserves operator edits in data/). Always refresh health_check.sh + agents/.
     # TOOLS.md: replace stale short stubs with TOOLS.md.example (see /upgrade-tools.sh). Set OPENCLAW_SKIP_TOOLS_MD_UPGRADE=1 to skip.
@@ -413,8 +421,8 @@ services:
         sh /upgrade-tools.sh
         cp -f /templates/health_check.sh /workspace/ 2>/dev/null || true
         mkdir -p /workspace/agents && cp -rf /templates/agents/. /workspace/agents/ 2>/dev/null || true
-        # Gateway runs as uid 1000 (node); copies above run as root and would block edit/write on *.md
-        chown -R 1000:1000 /workspace 2>/dev/null || true
+        # Gateway runs as uid 1000 (node); workspace + agents/ + canvas/ must be writable (e.g. agents/main/agent/models.json)
+        chown -R 1000:1000 /openclaw-config 2>/dev/null || true
     networks:
       - frontend
 
@@ -571,8 +579,6 @@ services:
     depends_on:
       model-gateway:
         condition: service_started
-      comfyui-mcp:
-        condition: service_started
       mcp-gateway:
         condition: service_started
       openclaw-workspace-sync:
@@ -589,6 +595,8 @@ services:
       NODE_ENV: production
       OPENCLAW_SKIP_SERVICE_CHECK: "true"
       OPENCLAW_GATEWAY_BIND: "lan"
+      # OpenClaw upstream default listen port is 18789; stack + healthcheck expect 6680
+      OPENCLAW_GATEWAY_PORT: "6680"
       DISCORD_BOT_TOKEN: ${DISCORD_TOKEN:-}
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
       # For agent to download ComfyUI models via dashboard API (Option B)
@@ -602,8 +610,6 @@ services:
       - ${BASE_PATH:-.}/data/mcp:/home/node/.openclaw/workspace/data/mcp
       # Same bind mount as comfyui-mcp:/workflows — agents write API-format JSON here so list_workflows/run_workflow see it
       - ${BASE_PATH:-.}/data/comfyui-workflows:/comfyui-workflows
-      # Same host path as comfyui:/root/ComfyUI/custom_nodes — install LTX/Juno/etc. here (NOT under /app in this image)
-      - ${BASE_PATH:-.}/data/comfyui-storage/ComfyUI/custom_nodes:/home/node/.openclaw/workspace/comfyui-custom-nodes
       # Named volume for extensions — Windows bind mounts force 0777 which
       # OpenClaw's safe-open rejects. A named volume has proper Linux perms.
       - openclaw-extensions:/home/node/.openclaw/extensions

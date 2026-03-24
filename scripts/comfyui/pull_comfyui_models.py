@@ -27,7 +27,16 @@ QUANT = os.environ.get("COMFYUI_QUANT", "Q4_K_M")
 CONFIG_PATH = Path(os.environ.get("COMFYUI_CONFIG", SCRIPT_DIR / "models.json"))
 HF_TOKEN = os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN") or ""
 
-ALL_SUBDIRS = ("unet", "checkpoints", "text_encoders", "loras", "latent_upscale_models", "vae")
+ALL_SUBDIRS = (
+    "unet",
+    "checkpoints",
+    "text_encoders",
+    "loras",
+    "latent_upscale_models",
+    "vae",
+    "diffusion_models",
+    "vae_approx",
+)
 CHUNK = 16 * 1024 * 1024  # 16 MB read chunks
 
 

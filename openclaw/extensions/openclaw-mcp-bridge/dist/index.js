@@ -92,6 +92,9 @@ function register(api) {
     // Register each discovered MCP tool as its own OpenClaw tool (e.g. gateway__duckduckgo__search).
     // Upstream only registered *ServerName*__call; models often emit the namespaced MCP id, which hit Tool not found.
     let flatToolsRegistered = false;
+    /** Avoid infinite hooks if gateway never exposes tools. */
+    let flatToolsRegistrationAttempts = 0;
+    const MAX_FLAT_REGISTRATION_ATTEMPTS = 12;
     const registerFlatMcpTools = async () => {
         if (flatToolsRegistered) {
             return;
@@ -99,6 +102,21 @@ function register(api) {
         try {
             await ensureConnected();
             const discovered = mcpManager.getRegisteredTools();
+            if (discovered.length === 0) {
+                flatToolsRegistrationAttempts += 1;
+                if (flatToolsRegistrationAttempts >= MAX_FLAT_REGISTRATION_ATTEMPTS) {
+                    api.logger.warn("[mcp-bridge] registerFlatMcpTools: giving up after " +
+                        String(MAX_FLAT_REGISTRATION_ATTEMPTS) +
+                        " attempts with 0 tools — check mcp-gateway and data/mcp/servers.txt (include comfyui). " +
+                        "Use gateway__call with tool names from the gateway until flat tools appear.");
+                    flatToolsRegistered = true;
+                    return;
+                }
+                api.logger.warn("[mcp-bridge] registerFlatMcpTools: 0 tools in registry (attempt " +
+                    String(flatToolsRegistrationAttempts) + "/" + String(MAX_FLAT_REGISTRATION_ATTEMPTS) +
+                    "). Retrying on next hook — MCP gateway may still be loading servers.");
+                return;
+            }
             for (const rt of discovered) {
                 const srvCfg = config.servers[rt.serverName];
                 const pfx = srvCfg?.toolPrefix ?? rt.serverName;

@@ -139,6 +139,19 @@ Symptoms in **job run history** or the Control UI often **do not match** what yo
 
 If **`data/openclaw/workspace/TOOLS.md`** is an old short stub: **`openclaw-workspace-sync`** (and **`scripts/fix_openclaw_workspace_permissions`**) now **replace** it with **`TOOLS.md.example`** when the file lacks the current contract marker (`gateway__duckduckgo__search`). Set **`OPENCLAW_SKIP_TOOLS_MD_UPGRADE=1`** in `.env` to disable this. You can also run **`openclaw/scripts/upgrade_tools_md_from_example.ps1`** (Windows) or **`.sh`** (Linux/Mac) from the repo.
 
+### OpenClaw Control UI — “Update available” / **Updating…** stalls
+
+In **Docker**, the gateway binary lives in the **image**. The Control UI **Update** action runs an **npm/git-style** update that **cannot replace** `/app` inside the container, so it often **spins forever** on **Updating…**.
+
+**Do this instead:** pull a newer image and recreate the gateway:
+
+```bash
+docker compose pull openclaw-gateway
+docker compose up -d openclaw-gateway
+```
+
+**This repo:** `openclaw-config-sync` runs **`merge_gateway_config.py`**, which sets **`update.checkOnStart: false`** and **`update.auto.enabled: false`** unless **`OPENCLAW_ALLOW_IN_APP_UPDATE=1`** is set in `.env`. Dismiss the banner with **×** if it still appears after restart; see [Updating](https://docs.openclaw.ai/updating) for native (non-Docker) installs.
+
 **`GET requires an Mcp-Session-Id header` or 400 on `http://…:8811/mcp`:** Expected for raw `curl`/browser GET. The MCP gateway speaks the MCP transport; use **`gateway__call`** from OpenClaw or a proper MCP client — not a naked GET probe.
 
 **`missing_brave_api_key` on native `web_search`:** This repo’s **`openclaw.json`** sets **`tools.web.search.enabled: false`** so native **`web_search`** is off — use **`gateway__call`** with **`duckduckgo__search`** (MCP) for web search. To use Brave or another built-in provider instead, set **`tools.web.search.enabled: true`**, configure a provider per [OpenClaw web tools](https://docs.openclaw.ai/tools/web), and set the matching API key in `.env`.
@@ -147,6 +160,8 @@ If **`data/openclaw/workspace/TOOLS.md`** is an old short stub: **`openclaw-work
 
 The gateway runs as **`node` (uid 1000)**. If workspace files were created **as root** (e.g. manual `docker run`, editor as admin, or an old sync without ownership fix), **`edit` / `write` on `MEMORY.md` fails** inside the container.
 
+**Model catalog / `agents` writes:** Errors such as **`EACCES` on `.../agents/main/agent/models.json*.tmp`** mean the same ownership problem under **`data/openclaw/agents/`** (not only `workspace/`). **`openclaw-workspace-sync`** re-`chown`s the **entire** **`data/openclaw`** tree to **1000:1000**.
+
 **Fix (recommended):** Re-run workspace sync so bind-mounted files are **`chown`’d to 1000:1000** (compose does this after seeding):
 
 ```bash
@@ -154,9 +169,9 @@ docker compose run --rm openclaw-workspace-sync
 docker compose up -d openclaw-gateway
 ```
 
-**Host-only (Linux):** from the repo, `sudo chown -R 1000:1000 data/openclaw/workspace`.
+**Host-only (Linux):** from the repo, `sudo chown -R 1000:1000 data/openclaw`.
 
-**Windows (host file ACL):** ensure your user (or “Users”) has **Modify** on `data\openclaw\workspace`; remove inherited deny if any. If a file was created as Administrator, delete it once or take ownership, then re-run sync.
+**Windows (host file ACL):** ensure your user (or “Users”) has **Modify** on `data\openclaw` (including `workspace` and `agents`); remove inherited deny if any. If a file was created as Administrator, delete it once or take ownership, then re-run sync.
 
 ### Dashboard API — `Bearer token required` / `401`
 
@@ -168,22 +183,26 @@ Automated tools and agents calling the dashboard from **inside** the stack shoul
 
 ### ComfyUI — LTX 2.3 video and `clip input is invalid: None`
 
-**`ltx-2.3-22b`** is not a generic SD1.5 checkpoint graph: plain **`CLIPTextEncode`** off **`CheckpointLoaderSimple`** often yields **no CLIP**. Use the **LTX / Gemma text path** your ComfyUI build documents (e.g. **`LTXAVTextEncoderLoader`** + **`CLIPTextEncodeFlux`** wired to that CLIP), or **`gateway__call`** with **`tool`**: **`run_workflow`** (and a **`workflow_id`** that matches your nodes) — see **`TOOLS.md`** and packaged workflows under **`data/comfyui-workflows/`**.
+**`ltx-2.3-22b`** is not a generic SD1.5 checkpoint graph: plain **`CLIPTextEncode`** off **`CheckpointLoaderSimple`** often yields **no CLIP**. Use the **LTX / Gemma text path** your ComfyUI build documents (e.g. **`LTXAVTextEncoderLoader`** + **`CLIPTextEncodeFlux`** wired to that CLIP), or **`gateway__call`** with **`tool`**: **`comfyui__run_workflow`** (and a **`workflow_id`** that matches your nodes) — see **`TOOLS.md`** and packaged workflows under **`data/comfyui-workflows/`**.
 
 ### ComfyUI — MCP `install_custom_node_requirements` / `restart_comfyui` missing or token error
 
 These tools are registered by the **ComfyUI MCP** image (`comfyui-mcp`). They call **ops-controller** and require **`OPS_CONTROLLER_TOKEN`** in `.env`.
 
-- **`mcp-gateway`** must receive **`OPS_CONTROLLER_TOKEN`** and a **`registry-custom.yaml`** that includes **`OPS_CONTROLLER_TOKEN: PLACEHOLDER_OPS_CONTROLLER_TOKEN`** (repo template: **`mcp/registry-custom.yaml`**). The gateway **entrypoint** substitutes the token into **`registry-custom.docker.yaml`**. If you created **`data/mcp/registry-custom.yaml`** before this layout, **merge** those lines from the repo template or delete the file and re-run **`scripts/ensure_dirs`** so a fresh copy is created (then re-add **`comfyui`** to **`servers.txt`** if needed).
+- **`mcp-gateway`** must receive **`OPS_CONTROLLER_TOKEN`** and a **`registry-custom.yaml`** that includes **`OPS_CONTROLLER_TOKEN: PLACEHOLDER_OPS_CONTROLLER_TOKEN`** (repo template: **`mcp/gateway/registry-custom.yaml`**). The gateway **entrypoint** substitutes the token into **`registry-custom.docker.yaml`**. If you created **`data/mcp/registry-custom.yaml`** before this layout, **merge** those lines from the repo template or delete the file and re-run **`scripts/ensure_dirs`** so a fresh copy is created (then re-add **`comfyui`** to **`servers.txt`** if needed).
 - Rebuild the ComfyUI MCP image after pulling: **`docker compose build comfyui-mcp-image`** (or **`docker compose build comfyui-mcp`**) and restart **`mcp-gateway`** and **`openclaw-gateway`**.
 
-### ComfyUI — `Tool not found` for `gateway__comfyui__run_workflow` / OpenClaw
+### ComfyUI — `Tool not found` for `gateway__run_workflow` / OpenClaw
 
-The MCP bridge registers **`gateway__call`** first. For ComfyUI, pass the **inner** tool name from the ComfyUI MCP server (usually plain names: **`run_workflow`**, **`list_workflows`**, **`generate_image`**):
+ComfyUI MCP is **only** behind **`mcp-gateway`** (`data/mcp/servers.txt` must list **`comfyui`**). There is no separate OpenClaw `servers.comfyui` URL.
 
-- **`gateway__call`** with **`tool`**: **`run_workflow`** and **`args`**: `{ "workflow_id": "…", … }` — this resolves to **`gateway__run_workflow`** (not `gateway__comfyui__run_workflow`).
+- **Invalid top-level ids:** **`gateway__run_workflow`**, **`gateway__generate_image`** — not registered.
+- **Use flat tools (forked bridge):** **`gateway__comfyui__run_workflow`**, **`gateway__comfyui__list_workflows`**, **`gateway__comfyui__generate_image`**, etc.
+- **Or `gateway__call`** with **`tool`**: **`comfyui__run_workflow`** (namespaced name from the gateway, not bare **`run_workflow`**).
 
-If **`gateway__run_workflow`** still fails, the Docker MCP gateway may prefix tool names with the backend id — try **`tool`**: **`comfyui__run_workflow`**. After changing MCP servers, restart **`openclaw-gateway`** so flat tools re-register.
+After changing **`servers.txt`**, wait for gateway reload (~10s) or **`docker compose restart mcp-gateway openclaw-gateway`**.
+
+If ComfyUI tools are missing entirely, confirm **`MCP_GATEWAY_SERVERS`** in compose/dashboard includes **`comfyui`** and **`docker compose build comfyui-mcp-image`** has succeeded (gateway spawns the ComfyUI MCP image).
 
 ### ComfyUI — `missing_node_type` / UI workflow JSON
 
@@ -195,20 +214,19 @@ Community packs (e.g. Juno) often ship **ComfyUI UI** format (`"nodes": [ ... ]`
 
 `list_workflows` includes **`*.json`** under **`data/comfyui-workflows/`** recursively. Use **`workflow_id`** as the **POSIX path without `.json`**, e.g. `juno-comfyui-workflows-main/juno-comfyui-workflows-main/ltx-video/LTX-2.3_-_T2V_Basic` (slashes, not backslashes).
 
-### ComfyUI — custom nodes installed in the wrong place (OpenClaw vs ComfyUI)
+### ComfyUI — custom nodes / `pip` in the ComfyUI venv (host or dashboard)
 
-`exec`/`read`/`edit` in the **OpenClaw gateway** container must **not** install into **`/app/ComfyUI/...`** — that path is **not** the ComfyUI service. Use **`workspace/comfyui-custom-nodes/`**, which binds to **`data/comfyui-storage/ComfyUI/custom_nodes/`** (the same directory the **`comfyui`** container loads). Restart **`comfyui`** after adding nodes. See **`workspace/agents/docker-ops.md`**.
+Custom node packs belong under **`data/comfyui-storage/ComfyUI/custom_nodes/`** on the host (the **`comfyui`** service loads that tree). The OpenClaw gateway does **not** bind-mount that path into its workspace — install or edit packs on the **host** (or use ComfyUI / ComfyUI Manager in the browser on **`comfyui`**).
 
 ### ComfyUI — `docker: Permission denied` / agent cannot run `docker exec`
 
 The **OpenClaw gateway** has **no** Docker socket. **`docker`**, **`docker compose exec`**, and **`gateway__run_command`** will not work for **`comfyui`**.
 
-1. **Files:** place or edit custom node trees under **`data/comfyui-storage/ComfyUI/custom_nodes/`** (same as **`workspace/comfyui-custom-nodes/`** in the gateway).
-2. **Python requirements (from OpenClaw):** **`POST`** **`http://dashboard:8080/api/comfyui/install-node-requirements`** with **`Authorization: Bearer <DASHBOARD_AUTH_TOKEN>`** and JSON **`{"node_path":"<folder-under-custom_nodes>","confirm":true}`**. Requires **`OPS_CONTROLLER_TOKEN`** (dashboard → ops-controller). **`comfyui`** must be running.
-3. **Restart** **`comfyui`:** **`POST`** **`/api/ops/services/comfyui/restart`** with the same Bearer token.
-4. **Host fallback:** **`scripts/comfyui/install_node_requirements.sh`** / **`.ps1`**, or **`docker compose restart comfyui`**.
+1. **Python deps for a node folder:** **`POST`** **`http://dashboard:8080/api/comfyui/install-node-requirements`** with **`Authorization: Bearer <DASHBOARD_AUTH_TOKEN>`** and JSON **`{"node_path":"<folder-under-custom_nodes>","confirm":true}`**. Requires **`OPS_CONTROLLER_TOKEN`**. **`comfyui`** must be running.
+2. **Restart** **`comfyui`:** **`POST`** **`/api/ops/services/comfyui/restart`** with the same Bearer token.
+3. **Host fallback:** **`scripts/comfyui/install_node_requirements.sh`** / **`.ps1`**, or **`docker compose restart comfyui`**.
 
-Full playbook: **`openclaw/workspace/agents/comfyui-assets.md`** (synced into **`data/openclaw/workspace/agents/`** when **`openclaw-workspace-sync`** runs).
+See **`workspace/agents/docker-ops.md`** for compose and ops-controller usage.
 
 ## Escalation
 

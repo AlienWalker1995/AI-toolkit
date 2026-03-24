@@ -57,6 +57,8 @@ If you use **`overrides/openclaw-secure.yml`**, the mapped gateway port is typic
 
 **Existing config?** Ensure `plugins.entries["openclaw-mcp-bridge"]` is set as in [mcp/README.md](../mcp/README.md#openclaw); this repo’s `data/openclaw/openclaw.json` already includes it.
 
+**Updating the gateway (Docker):** The Control UI **Update** button runs **`openclaw update`**-style flows (npm/git) that **cannot replace** the gateway binary inside the image, so it often **hangs on “Updating…”**. This stack disables in-app update checks in **`openclaw.json`** (`update.checkOnStart` / `update.auto.enabled`) via **`openclaw/scripts/merge_gateway_config.py`**. To upgrade: **`docker compose pull`** (or pin **`OPENCLAW_IMAGE`**) then **`docker compose up -d openclaw-gateway`**. Set **`OPENCLAW_ALLOW_IN_APP_UPDATE=1`** in `.env` only if you intentionally re-enable UI-driven updates (still unlikely to work in a standard image-only setup). See [Updating](https://docs.openclaw.ai/updating) for native installs.
+
 **Not reachable?** When using the main AI-toolkit compose, the gateway is configured with `OPENCLAW_GATEWAY_BIND=lan` so it accepts connections from the host. If you run OpenClaw standalone from `openclaw/`, add `OPENCLAW_GATEWAY_BIND=lan` to your `.env`. Then verify: `docker compose ps` (gateway running), `docker compose logs openclaw-gateway` (no errors).
 
 **Dashboard performance monitoring:** To see OpenClaw throughput in the dashboard (Token Throughput section), use the **gateway** provider for models. In Settings → Model, pick a model prefixed with `gateway/` (e.g. `gateway/ollama/deepseek-r1:7b`). If you only see `ollama/` models, add the gateway provider to `data/openclaw/openclaw.json` — copy the `gateway` block from `openclaw/openclaw.json.example` into `models.providers`.
@@ -73,7 +75,7 @@ Layering (see templates in `openclaw/workspace/`). **In git:** only `*.md.exampl
 | `USER.md` | Operator profile and preferences (optional; from `USER.md.example`) |
 | `IDENTITY.md` | Optional display name / avatar notes (from `IDENTITY.md.example`) |
 | `AGENTS.md` | Operating policy; **starts with non-negotiables** (MCP names, Discord/cron truth, message length) so they survive bootstrap truncation |
-| `TOOLS.md` | **Short canonical contract:** URLs, single MCP gateway (**`gateway__call`** / flat **`gateway__comfyui__*`** tools), cron+Discord — ComfyUI **nodes vs workflows**, no Docker-from-gateway, **`workspace/agents/comfyui-assets.md`**; service/API ops in **`workspace/agents/docker-ops.md`** and **TROUBLESHOOTING** |
+| `TOOLS.md` | **Short canonical contract:** single MCP gateway (**`gateway__call`** / flat **`gateway__…`** tools), core service URLs, cron+Discord; service/API ops in **`workspace/agents/docker-ops.md`** and **TROUBLESHOOTING** |
 | `MEMORY.md` | Curated long-term notes (main session) |
 | `HEARTBEAT.md` | Optional operator checklist (from `HEARTBEAT.md.example`) |
 | `memory/` | Dated episodic notes (`YYYY-MM-DD.md`) |

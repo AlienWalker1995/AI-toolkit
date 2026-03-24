@@ -50,6 +50,9 @@ MODEL_CACHE_TTL = float(os.environ.get("MODEL_CACHE_TTL_SEC", "60"))
 OLLAMA_NUM_CTX = int(os.environ.get("OLLAMA_NUM_CTX", "16384"))
 # When Claude Code sends a "claude-*" model name, remap it to this local model.
 CLAUDE_CODE_LOCAL_MODEL = os.environ.get("CLAUDE_CODE_LOCAL_MODEL", "")
+# If true, append synthetic claude-* ids to /v1/models (for clients that validate against the list).
+# Default off — those fake Sonnet names pollute Open WebUI / OpenClaw "active models" sync.
+CLAUDE_CODE_ADVERTISE_ALIASES = os.environ.get("CLAUDE_CODE_ADVERTISE_ALIASES", "").strip() == "1"
 
 # TTL model list cache: avoids hitting Ollama on every /v1/models call.
 _model_cache: list = []
@@ -170,17 +173,11 @@ async def list_models():
                 name = m.get("name", "")
                 if name:
                     ts = m.get("modified_at", 0) or 0
-                    # Expose bare name (e.g. deepseek-r1:7b) so Claude Code and other
-                    # clients that validate model names against this list can find them.
+                    # Single canonical id per model — the same string the gateway uses when
+                    # forwarding to Ollama. Do not also emit ollama/{name}; that duplicated entries
+                    # in Open WebUI / OpenClaw (hf.co/... and ollama/hf.co/... for the same model).
                     objects.append({
                         "id": name,
-                        "object": "model",
-                        "created": ts,
-                        "owned_by": "ollama",
-                    })
-                    # Also expose prefixed form (ollama/name) for provider-aware clients.
-                    objects.append({
-                        "id": f"ollama/{name}",
                         "object": "model",
                         "created": ts,
                         "owned_by": "ollama",
@@ -207,9 +204,9 @@ async def list_models():
         except Exception:
             pass
 
-    # When CLAUDE_CODE_LOCAL_MODEL is set, advertise claude-* model names so
-    # Claude Code's model validation passes before the request is remapped.
-    if CLAUDE_CODE_LOCAL_MODEL and objects:
+    # Optional: advertise fixed claude-* ids in /v1/models. Remapping in chat still works
+    # without this (see _resolve_claude_model). Opt-in — do not sync fake models to OpenClaw by default.
+    if CLAUDE_CODE_LOCAL_MODEL and CLAUDE_CODE_ADVERTISE_ALIASES and objects:
         for alias in ("claude-sonnet-4-5-20250514", "claude-sonnet-4-6-20250725"):
             objects.append({
                 "id": alias,
