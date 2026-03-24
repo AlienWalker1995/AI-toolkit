@@ -1,57 +1,67 @@
-# AI-toolkit
+<!--
+  Badges (optional): add when repo URL and CI are stable, e.g.:
+  [![CI](...)](...)  [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
+-->
 
-Hey, I am Cam, I made this repo to simplify my local-LLM setup. I wanted a bunch of tools setup in a single spot -- and of course, all dockerized. 
-
-Ollama + Open WebUI + ComfyUI + N8N in Docker. **Bootstrap + full stack:** `.\ai-toolkit.ps1 initialize` (Windows) or `./ai-toolkit initialize` (Linux/Mac). **Quick up:** `./compose up -d` — auto-detects hardware for best performance.
-
-→ [Getting started](docs/GETTING_STARTED.md) · [Configuration](docs/configuration.md) · [Docker Runtime](docs/docker-runtime.md) · [Data](docs/data.md) · [Troubleshooting](docs/runbooks/TROUBLESHOOTING.md) · [Architecture](docs/Product%20Requirements%20Document.md)
-
-## Services
-
-| Service | Port | Purpose |
-|---------|------|---------|
-| **dashboard** | 8080 | **Unified model manager** — [localhost:8080](http://localhost:8080) |
-| **ollama** | 11434 | Local LLM runtime (GPU) |
-| **model-gateway** | 11435 | OpenAI-compatible proxy (Ollama/vLLM) |
-| **open-webui** | 3000 | Chat UI — [localhost:3000](http://localhost:3000) |
-| **comfyui** | 8188 | Stable Diffusion / LTX-2 — [localhost:8188](http://localhost:8188) |
-| **n8n** | 5678 | Workflow automation — [localhost:5678](http://localhost:5678) |
-| **OpenClaw** | **6680** (Control UI; add `?token=`) · 6682 = browser bridge only | [openclaw/](openclaw/) · optional [openclaw-secure](overrides/openclaw-secure.yml) uses **18789** on localhost |
-| **MCP Gateway** | 8811 | Shared MCP tools — [mcp/](mcp/) |
-| **ops-controller** | — | Start/stop/restart services from dashboard (set `OPS_CONTROLLER_TOKEN`) |
-| model-puller | — | Ready to pull Ollama models on demand |
-| comfyui-model-puller | — | Ready to download LTX-2 models (~60 GB) on demand |
-
-## Setup
-
-1. **Clone** to your drive (e.g. `F:\AI-toolkit` or `~/AI-toolkit`).
-2. **Optional:** `copy .env.example .env` / `cp .env.example .env` and set `BASE_PATH` (and `DATA_PATH` if you want app data outside the repo). The initializer creates `.env` from the example if missing and sets `OPENCLAW_GATEWAY_TOKEN`.
-3. **One command — full bootstrap + stack** (dirs, `ensure_dirs`, OpenClaw workspace seeds, GPU `compute.yml`, then `docker compose up -d --build --force-recreate`):
-
-```powershell
-cd F:\AI-toolkit
-.\ai-toolkit.ps1 initialize
-# cmd.exe: .\ai-toolkit.cmd initialize
+```
+██████╗ AI-toolkit
+──────────────────
+Docker Compose stack for local LLMs, chat UI, image/video (ComfyUI), automation (n8n), and OpenClaw — with a unified dashboard.
 ```
 
-```bash
-cd ~/AI-toolkit
-./ai-toolkit initialize
-```
+## Overview
 
-**Manual alternative** (no forced rebuild/recreate): `.\scripts\ensure_dirs.ps1` then `.\compose.ps1 up -d` (Windows) or `./scripts/ensure_dirs.sh` then `./compose up -d` (Linux/Mac).
+**AI-toolkit** packages a **local-first** stack: Ollama-backed models behind an **OpenAI-compatible** model-gateway, **Open WebUI** for chat, **ComfyUI** for diffusion workflows, **n8n** for workflows, **OpenClaw** as an optional assistant layer, and an **MCP gateway** for shared tools. A **dashboard** provides a single place to inspect dependencies, pull models, and (with tokens set) control parts of the stack.
 
-4. Open the **dashboard** at [localhost:8080](http://localhost:8080); pull models from there; chat at [localhost:3000](http://localhost:3000).
+**Who it is for:** Operators running the stack on their own machine or LAN; contributors changing Python services, tests, and Compose definitions.
 
-**No GPU?** After init: `.\compose.ps1 up -d ollama dashboard open-webui` — see [Troubleshooting](docs/runbooks/TROUBLESHOOTING.md).
+**Docs:** [Getting started](docs/GETTING_STARTED.md) · [Configuration](docs/configuration.md) · [Docker runtime](docs/docker-runtime.md) · [Data](docs/data.md) · [Troubleshooting](docs/runbooks/TROUBLESHOOTING.md) · [Architecture / PRD](docs/Product%20Requirements%20Document.md)
 
-**If ComfyUI or OpenClaw fail:** See dashboard hints and [Troubleshooting](docs/runbooks/TROUBLESHOOTING.md).
+## Features
 
-## Daily use
+- **Unified dashboard** (port **8080**) — model lists, service links, dependency health, model pulls (when configured).
+- **Model gateway** (**11435**) — OpenAI-compatible API in front of Ollama / vLLM backends.
+- **Open WebUI** (**3000**) — chat UI.
+- **ComfyUI** (**8188**) — workflows; large optional model downloads on demand.
+- **n8n** (**5678**) — automation.
+- **OpenClaw** (**6680** control UI; **6682** browser bridge) — optional; requires `OPENCLAW_GATEWAY_TOKEN`.
+- **MCP gateway** (**8811**) — shared MCP tools for connected clients.
+- **Ops controller** (internal **9000**; no host port by default) — compose lifecycle from the dashboard when `OPS_CONTROLLER_TOKEN` is set.
+- **GPU profiles** — `scripts/detect_hardware.py` generates `overrides/compute.yml` (gitignored) for NVIDIA / AMD / Intel / CPU paths.
 
-**Full restart** (same as setup step 3): `.\ai-toolkit.ps1 initialize` or `./ai-toolkit initialize`.
+## Quickstart
 
-**Quick bring-up** (no rebuild/recreate; `compose` runs hardware detection):
+**Prerequisites:** [Docker](https://docs.docker.com/get-docker/) with Compose, and enough disk for models. For **tests/lint**, Python **3.12+** (see `pyproject.toml`).
+
+1. Clone this repository and open a shell at the repo root.
+
+2. **Environment:** If `.env` is missing, init scripts can create it from `.env.example`. Otherwise copy manually:
+
+   ```bash
+   cp .env.example .env
+   ```
+
+   Set at least **`BASE_PATH`** to the repo root (see comments in [`.env.example`](.env.example)). Optional: **`DATA_PATH`**, tokens, and model lists.
+
+3. **Full bootstrap** (directories, hardware detection, workspace seeds, then `docker compose up -d --build --force-recreate`):
+
+   **Windows (PowerShell):**
+
+   ```powershell
+   cd C:\path\to\AI-toolkit
+   .\ai-toolkit.ps1 initialize
+   ```
+
+   **Linux / macOS:**
+
+   ```bash
+   cd ~/path/to/AI-toolkit
+   ./ai-toolkit initialize
+   ```
+
+4. Open the **dashboard** at [http://localhost:8080](http://localhost:8080) and **Open WebUI** at [http://localhost:3000](http://localhost:3000).
+
+**Lighter bring-up** (no forced rebuild/recreate; runs hardware detection via the `compose` wrapper):
 
 ```powershell
 .\compose.ps1 up -d
@@ -61,74 +71,80 @@ cd ~/AI-toolkit
 ./compose up -d
 ```
 
-**On-demand commands** (pull models when you want):
-- `.\compose.ps1 run --rm model-puller` / `./compose run --rm model-puller` — pull Ollama models from `.env`
-- `.\compose.ps1 run --rm comfyui-model-puller` — download LTX-2 models (~60 GB)
-- `.\compose.ps1 run --rm openclaw-cli onboard` — OpenClaw setup
+**CPU-only / minimal services:** after init, bring up a subset, e.g. `ollama`, `dashboard`, `open-webui` — see [Troubleshooting](docs/runbooks/TROUBLESHOOTING.md).
 
-## Dashboard
+## Installation
 
-The **dashboard** at [localhost:8080](http://localhost:8080) gives you a single web UI to:
+- **Runtime:** Everything runs in containers; install **Docker** and use the repo from a fixed path (set `BASE_PATH` accordingly).
+- **Development:** Python **3.12+**. Install test dependencies:
 
-- **View all models** — Ollama (LLM) and ComfyUI (LTX-2) in one place
-- **Restart services** — when `OPS_CONTROLLER_TOKEN` is set in `.env`
-- **ComfyUI custom-node Python deps** — authenticated `POST /api/comfyui/install-node-requirements` (proxied to ops-controller; OpenClaw can call this with `DASHBOARD_AUTH_TOKEN` — see `openclaw/workspace/agents/comfyui-assets.md`)
-- **Pull models** — searchable dropdown with 150+ Ollama models; or type any model name
-- **Jump to services** — Open WebUI, ComfyUI, N8N, OpenClaw, MCP Gateway
-- **RAG** — `docker compose --profile rag up -d`, drop files in `data/rag-input/`; details in [Getting started — RAG](docs/GETTING_STARTED.md#rag-documents-in-chat)
+  ```bash
+  pip install -r tests/requirements.txt
+  ```
 
-**Not seeing updates?** After pulling code changes, rebuild: `.\compose.ps1 build dashboard` then `.\compose.ps1 up -d`
+  On Linux/macOS you can use **`make test`**, **`make lint`**, and **`make smoke-test`** (see [Makefile](Makefile)).
 
-## Ollama models
+## Configuration
 
-Default models (set in `.env`):
+Primary reference: **[`.env.example`](.env.example)** (copy to `.env`).
 
-- `deepseek-r1:7b` — reasoning
-- `deepseek-coder:6.7b` — coding
-- `nomic-embed-text` — embeddings / RAG
+| Area | Variables (examples) |
+|------|----------------------|
+| Paths | `BASE_PATH`, `DATA_PATH` |
+| Models | `MODELS`, `DEFAULT_MODEL` |
+| OpenClaw | `OPENCLAW_GATEWAY_TOKEN`, optional Discord/Telegram tokens |
+| Security / APIs | `DASHBOARD_AUTH_TOKEN`, `OPS_CONTROLLER_TOKEN`, `WEBUI_AUTH`, `HF_TOKEN`, `GITHUB_PERSONAL_ACCESS_TOKEN` |
+| MCP | `MCP_GATEWAY_SERVERS` |
+| Compute | `COMPUTE_MODE`, `COMPOSE_FILE` (see comments for `overrides/*.yml`) |
+| RAG profile | `EMBED_MODEL`, `QDRANT_PORT`, `RAG_COLLECTION`, … |
 
-**Pull via dashboard** (recommended) or via CLI:
+Auto-generated: **`overrides/compute.yml`** (from hardware detection). Do not commit secrets; `.env` is gitignored.
+
+## Usage
+
+- **Daily restart / full rebuild:** same as Quickstart step 3 (`ai-toolkit initialize`).
+- **On-demand one-off containers:**
+
+  ```bash
+  ./compose run --rm model-puller
+  ./compose run --rm comfyui-model-puller
+  ./compose run --rm openclaw-cli onboard
+  ```
+
+- **RAG:** `docker compose --profile rag up -d` and ingest paths per [Getting started — RAG](docs/GETTING_STARTED.md#rag-documents-in-chat).
+- **MCP clients:** connect to `http://localhost:8811/mcp` (see [mcp/README.md](mcp/README.md)).
+- **OpenClaw control UI:** `http://localhost:6680/?token=<OPENCLAW_GATEWAY_TOKEN>` — see [openclaw/README.md](openclaw/README.md) and [openclaw/OPENCLAW_SECURE.md](openclaw/OPENCLAW_SECURE.md).
+
+### Dashboard
+
+The dashboard at [http://localhost:8080](http://localhost:8080) lists models (Ollama and ComfyUI), links to other services, dependency health, and searchable model pulls. With **`OPS_CONTROLLER_TOKEN`** set, it can restart services and trigger ComfyUI custom-node installs via **`POST /api/comfyui/install-node-requirements`** (proxied to ops-controller; OpenClaw may use **`DASHBOARD_AUTH_TOKEN`** — see [`openclaw/workspace/agents/comfyui-assets.md`](openclaw/workspace/agents/comfyui-assets.md)).
+
+After code changes affecting the dashboard image: `.\compose.ps1 build dashboard` then `.\compose.ps1 up -d` (or `./compose` equivalents).
+
+### Ollama models
+
+Pull lists and defaults come from **`.env`** (`MODELS`, `DEFAULT_MODEL`). Pull via the dashboard or:
 
 ```bash
-./compose run --rm model-puller   # on-demand from .env
-# Or use the dashboard at localhost:8080
+./compose run --rm model-puller
 ```
 
-## ComfyUI (LTX-2)
+### ComfyUI (LTX-2)
 
-ComfyUI starts independently. LTX-2 models (~60 GB) are downloaded on demand — first run takes a while; subsequent runs skip existing files.
+Large optional downloads on demand; first run can take a long time. Pull via the dashboard or `./compose run --rm comfyui-model-puller`.
 
-**Includes:** LTX-2 checkpoint (fp8), LoRAs, latent upscaler, Gemma 3 12B text encoder.
+### Security
 
-**Pull via dashboard** (recommended) or:
+- **Open WebUI:** set `WEBUI_AUTH=True` when exposing the stack beyond localhost.
+- **OpenClaw:** requires `OPENCLAW_GATEWAY_TOKEN`; for restricted access see [openclaw/OPENCLAW_SECURE.md](openclaw/OPENCLAW_SECURE.md) and `overrides/openclaw-secure.yml`.
+- **Ops controller:** requires `OPS_CONTROLLER_TOKEN` for dashboard-driven lifecycle and installs.
+- Never commit `.env`. Full notes: [SECURITY.md](SECURITY.md).
 
-```bash
-./compose run --rm comfyui-model-puller
-```
+### GPU / compute
 
-## Security
+Hardware detection writes **`overrides/compute.yml`**. The `compose` wrapper runs detection before commands. **No GPU:** minimal stack and CPU paths — [Troubleshooting](docs/runbooks/TROUBLESHOOTING.md).
 
-- **Open WebUI** — set `WEBUI_AUTH=True` in `.env` when exposing to a network.
-- **OpenClaw** — requires `OPENCLAW_GATEWAY_TOKEN`. For Tailscale-only access, use `overrides/openclaw-secure.yml`. See [OPENCLAW_SECURE.md](openclaw/OPENCLAW_SECURE.md).
-- **Ops Controller** — requires `OPS_CONTROLLER_TOKEN` for dashboard start/stop/restart.
-- Never commit `.env`. Full threat model: [SECURITY.md](SECURITY.md).
-
-## GPU / compute
-
-**Auto-detection:** The setup script (`ensure_dirs`) runs `scripts/detect_hardware.py`, which detects your GPU and generates `overrides/compute.yml` (auto-generated, gitignored):
-
-| Detected | Ollama | ComfyUI |
-|----------|--------|---------|
-| **NVIDIA** | GPU (NVIDIA Container Toolkit) | CUDA 12.8 |
-| **AMD** | ROCm | ROCm |
-| **Intel** | CPU | XPU |
-| **CPU** | CPU | CPU (slower) |
-
-The `compose` wrapper runs detection before every command, so `.\compose.ps1 up -d` or `./compose up -d` always uses the best settings.
-
-**No GPU?** Run the minimal stack: `.\compose.ps1 up -d ollama dashboard open-webui`. ComfyUI will use CPU by default (slower). See [Troubleshooting](docs/runbooks/TROUBLESHOOTING.md).
-
-## Architecture
+### Architecture
 
 ```
 User → Dashboard / Open WebUI / N8N / OpenClaw
@@ -138,113 +154,82 @@ User → Dashboard / Open WebUI / N8N / OpenClaw
          └── Ops Controller (:9000) → Docker Compose lifecycle
 ```
 
-Local-first, single model endpoint (OpenAI-compatible), dashboard never mounts docker.sock. Full design: [Product Requirements Document](docs/Product%20Requirements%20Document.md).
+Local-first, OpenAI-compatible endpoint; dashboard does not mount `docker.sock`. Details: [Product Requirements Document](docs/Product%20Requirements%20Document.md).
 
-## Data
+### Data
 
-Bind mounts only (no Docker named volumes). Set **`BASE_PATH`** in `.env` to the repo root. Optional **`DATA_PATH`** defaults to `BASE_PATH/data`; many services use it, but some paths are still under `BASE_PATH/data` (see `docker-compose.yml`). Ollama model blobs live under **`models/ollama`**.
+Bind mounts only. Set **`BASE_PATH`** (and optionally **`DATA_PATH`**). Ollama blobs under **`models/ollama`**. See [docs/data.md](docs/data.md) and [docs/docker-runtime.md](docs/docker-runtime.md).
 
-For detailed data schemas, lifecycle, and persistence rules, see **[docs/data.md](docs/data.md)**.
+### MCP (Model Context Protocol)
 
-For core workspace layout and volume mounts, see **[docs/docker-runtime.md](docs/docker-runtime.md)**.
+[MCP Gateway](mcp/) — configure servers with `MCP_GATEWAY_SERVERS` in `.env`. Endpoint: `http://localhost:8811/mcp`. See [mcp/README.md](mcp/README.md).
 
-## MCP (Model Context Protocol)
+### OpenClaw
 
-The [MCP Gateway](mcp/) exposes shared MCP tools (web search, GitHub, etc.) to all services. Add servers via `MCP_GATEWAY_SERVERS` in `.env`. Connect Open WebUI, N8N, Cursor, and OpenClaw to `http://localhost:8811/mcp`. See [mcp/README.md](mcp/README.md).
+[openclaw/](openclaw/) is integrated in the main compose. Workspace: **`data/openclaw/workspace/`** (`MEMORY.md`, `TOOLS.md`, `SOUL.md`, `AGENTS.md`, `USER.md`). If **`MEMORY.md`** is not writable or **`TOOLS.md`** is stale, run **`scripts/fix_openclaw_workspace_permissions.ps1`** or **`./scripts/fix_openclaw_workspace_permissions.sh`**, then restart **`openclaw-gateway`**. See [docs/configuration.md](docs/configuration.md) and [Troubleshooting — OpenClaw workspace](docs/runbooks/TROUBLESHOOTING.md#openclaw-workspace--eacces--permission-denied-on-memorymd-or-other-md).
 
-## OpenClaw
+## Development
 
-[OpenClaw](openclaw/) is a personal AI assistant, integrated in the main compose. See [openclaw/README.md](openclaw/README.md) for token setup.
+- Python layout: `dashboard/`, `model-gateway/`, `ops-controller/`, `rag-ingestion/`, `scripts/`; Ruff config in [`pyproject.toml`](pyproject.toml).
+- **Do not commit:** `.env`, `data/`, `models/`, `overrides/compute.yml`, `mcp/.env` — see [CONTRIBUTING.md](CONTRIBUTING.md).
 
-### OpenClaw Control UI Access
-
-**Main Control UI:** `http://localhost:6680/?token=<OPENCLAW_GATEWAY_TOKEN>`
-
-**Note:** The Control UI is at port `6680`. Port `6682` is the browser/CDP bridge only (used internally).
-
-If the agent cannot write **`data/openclaw/workspace/MEMORY.md`** (`EACCES`), or **`TOOLS.md`** is still an old stub, run **`scripts/fix_openclaw_workspace_permissions.ps1`** (Windows) or **`./scripts/fix_openclaw_workspace_permissions.sh`** (Linux/Mac) from the repo root — it upgrades **`TOOLS.md`** from the template when needed, re-runs sync (**`chown`**), then restart **`openclaw-gateway`**. See [TROUBLESHOOTING — OpenClaw workspace](docs/runbooks/TROUBLESHOOTING.md#openclaw-workspace--eacces--permission-denied-on-memorymd-or-other-md).
-
-### OpenClaw Core Workspace
-
-The OpenClaw agent workspace lives at `data/openclaw/workspace/`. These files persist across container restarts:
-
-| File | Description |
-|---|-|
-| `MEMORY.md` | **Persistent memory** — key file for agent continuity |
-| `TOOLS.md` | Tool definitions and usage |
-| `SOUL.md` | Core agent identity and purpose |
-| `AGENTS.md` | Agent definitions |
-| `USER.md` | User profile and preferences |
-
-For complete workspace documentation, see **[docs/configuration.md](docs/configuration.md)** and **[docs/docker-runtime.md](docs/docker-runtime.md)**.
-
-## Commands
-
-```powershell
-# One command: bootstrap + rebuild/recreate + start the full default stack (from repo root)
-.\ai-toolkit.ps1 initialize
-# cmd.exe: .\ai-toolkit.cmd initialize
-
-# Docker compose wrapper (quick up — no forced rebuild/recreate)
-.\compose.ps1 up -d
-.\compose.ps1 logs -f ollama
-.\compose.ps1 down
-```
+## Testing
 
 ```bash
-./ai-toolkit initialize
-./ai-toolkit help
-./compose up -d
-```
-
-## Tests and lint
-
-Install test deps once (includes `pytest` and `ruff`):
-
-```powershell
 pip install -r tests/requirements.txt
 python -m pytest tests/ -v
-# Or: make test   (Linux/Mac)
 python -m ruff check dashboard tests model-gateway ops-controller rag-ingestion scripts
-# Or: make lint   (Linux/Mac)
 ```
 
-CI runs **pytest**, **ruff**, and a **fixture-based** `validate_openclaw_config.py` check (see `.github/workflows/ci.yml`).
+**OpenClaw config check** (example fixture path used in CI):
 
-### Health checks (M7)
+```bash
+python scripts/validate_openclaw_config.py tests/fixtures/openclaw_valid.json
+```
 
-Use these when something fails to start or OpenClaw cannot reach models:
-
-| What | Purpose |
-|------|---------|
-| **Doctor script** | Probes dashboard, model-gateway (`/health`, `/ready`), Ollama, MCP, then runs OpenClaw config validation. |
-| **`GET /api/dependencies`** | Dashboard JSON: live probes for every entry in the dependency registry (same data as the **Dependencies** section in the UI). |
-| **Model Gateway `GET /ready`** | L2 readiness (models listed); HTTP **503** if backends are down or no models are configured. |
-| **`scripts/validate_openclaw_config.py`** | Ensures `openclaw.json` wires `models.providers.gateway` to the model-gateway OpenAI endpoint. |
+**Health / diagnostics:**
 
 ```powershell
 .\scripts\doctor.ps1
-# Or: ./scripts/doctor.sh
-# Optional: DOCTOR_DEPS_TIMEOUT_SEC — max seconds for GET /api/dependencies (default 120).
-# Validate a specific file (optional --require in CI when the file must exist):
-python scripts/validate_openclaw_config.py data/openclaw/openclaw.json
 ```
 
-**Doctor output:** **WARN** on HTTP **404** for `/api/dependencies` or model-gateway `/ready` usually means the **container image is behind the repo** — run `docker compose build dashboard model-gateway` (or your compose wrapper) and recreate. **Ollama** (`localhost:11434`) and **MCP** (`localhost:8811`) are **WARN** by default: the main compose file keeps them **backend-only** (no host port). Use `overrides/ollama-expose.yml` and `overrides/mcp-expose.yml` if you want those URLs on localhost; set **`DOCTOR_STRICT=1`** to treat those probes as hard failures. The script reads `DASHBOARD_AUTH_TOKEN` from `.env` when probing the dashboard.
+```bash
+./scripts/doctor.sh
+```
 
-More copy-paste diagnostics (including `curl` for `/api/dependencies` and `/ready`): [TROUBLESHOOTING.md — Quick Diagnostics](docs/runbooks/TROUBLESHOOTING.md).
+Optional: `DOCTOR_DEPS_TIMEOUT_SEC`; `DASHBOARD_AUTH_TOKEN` from `.env` when probing the dashboard. See [Troubleshooting — Quick Diagnostics](docs/runbooks/TROUBLESHOOTING.md).
 
-**Smoke test** (bring up services and verify health):
+**Smoke (Docker required):**
 
 ```powershell
-.\scripts\smoke_test.ps1       # Windows
-./scripts/smoke_test.sh         # Linux/Mac (or: make smoke-test)
+.\scripts\smoke_test.ps1
 ```
 
-## Runbooks
+```bash
+./scripts/smoke_test.sh
+# or: make smoke-test
+```
 
-Operational runbooks in [docs/runbooks/](docs/runbooks/):
+**CI** ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)): TruffleHog secret scan; **pytest** + **ruff**; OpenClaw fixture validation; **`docker compose config`**; optional **compose smoke** via workflow dispatch.
 
-- [BACKUP_RESTORE.md](docs/runbooks/BACKUP_RESTORE.md) — Backup and restore data
-- [UPGRADE.md](docs/runbooks/UPGRADE.md) — Upgrade images and config
-- [TROUBLESHOOTING.md](docs/runbooks/TROUBLESHOOTING.md) — Common issues and fixes
+## Troubleshooting
+
+1. **Services won’t start or images are stale** — Rebuild affected images and recreate, e.g. `docker compose build dashboard model-gateway` (or the `compose` wrapper), then `up -d`. Doctor **WARN** on missing `/api/dependencies` or `/ready` often indicates an old image.
+2. **Doctor warns on Ollama (11434) or MCP (8811)** — Expected if those ports are not published; use `overrides/ollama-expose.yml` / `overrides/mcp-expose.yml` or set `DOCTOR_STRICT=1` only when you intend strict probes (see doctor script comments in repo).
+3. **No GPU** — Use a minimal service set or CPU-oriented overrides; ComfyUI will be slower.
+4. **OpenClaw workspace `EACCES` or stale `TOOLS.md`** — Run `scripts/fix_openclaw_workspace_permissions.ps1` or `./scripts/fix_openclaw_workspace_permissions.sh`, then restart `openclaw-gateway` — [Troubleshooting — OpenClaw](docs/runbooks/TROUBLESHOOTING.md#openclaw-workspace--eacces--permission-denied-on-memorymd-or-other-md).
+5. **Exposing to a network** — Enable **Open WebUI** auth (`WEBUI_AUTH=True`), protect **OpenClaw** with the gateway token, and harden **n8n** — see [SECURITY.md](SECURITY.md).
+
+More: [docs/runbooks/TROUBLESHOOTING.md](docs/runbooks/TROUBLESHOOTING.md) · [BACKUP_RESTORE.md](docs/runbooks/BACKUP_RESTORE.md) · [UPGRADE.md](docs/runbooks/UPGRADE.md)
+
+## Roadmap
+
+Rolling changes: [CHANGELOG.md](CHANGELOG.md).
+
+## Contributing
+
+See **[CONTRIBUTING.md](CONTRIBUTING.md)**. Report security issues per **[SECURITY.md](SECURITY.md)** (do not use public issues for vulnerabilities).
+
+## License
+
+[MIT License](LICENSE) — Copyright (c) 2026 AI-toolkit contributors.
