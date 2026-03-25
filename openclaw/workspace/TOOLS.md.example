@@ -10,6 +10,8 @@ Which tools exist here and how to invoke them.
 
 **Other MCP servers (catalog):** n8n, Playwright, ComfyUI, etc. — **`gateway__call`** with the live tool id and args, or flat **`gateway__…`** tools when present.
 
+**Browser / screenshots (Docker):** Built-in **`browser`** and local Chrome/Playwright inside **`openclaw-gateway`** fail (no Chromium there). “Chrome binary isn’t available” = wrong path. Use **MCP Playwright** only: **`gateway__playwright__browser_navigate`**, **`gateway__playwright__browser_take_screenshot`**, or **`gateway__call`** with **`playwright__…`** tools. **`web_fetch`** blocks **`localhost`**. Use **`http://dashboard:8080`**, not **`http://localhost:…`**. **`playwright`** in **`data/mcp/servers.txt`**; bridge **`http://mcp-gateway:8811/mcp`**.
+
 **ComfyUI:** Workflows through **ComfyUI tools on the MCP gateway**. API-format JSON under **`data/comfyui-workflows/`** ( **`/comfyui-workflows/`** for MCP). See **mcp/docs/comfyui-openclaw.md**.
 
 **Files and shell:** **`read`** / **`edit`** / **`exec`** per runtime for paths allowed in this workspace.

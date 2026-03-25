@@ -88,7 +88,7 @@ These files are **persistent** — they survive container restarts because they 
 | ollama | `ollama/ollama:0.18.1` | Docker Hub | Semantic version |
 | open-webui | `ghcr.io/open-webui/open-webui:v0.8.4` | GitHub CR | Semantic version |
 | qdrant | `qdrant/qdrant:v1.13.4` | Docker Hub | Semantic version |
-| openclaw-gateway | `ghcr.io/phioranex/openclaw-docker:latest` | GitHub CR | **Latest only** |
+| openclaw-gateway | `ghcr.io/openclaw/openclaw:2026.3.23` (override with `OPENCLAW_IMAGE`) | [GitHub Container Registry](https://github.com/openclaw/openclaw/pkgs/container/openclaw) | Pin or use `:latest` |
 | n8n | `docker.n8n.io/n8nio/n8n:2.10.2` | Docker Hub | Semantic version |
 
 **Important:** OpenClaw uses `:latest` only — there is no version pinning. This means updates to the OpenClaw image may include breaking changes.

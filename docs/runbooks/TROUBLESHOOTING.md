@@ -92,6 +92,29 @@ docker compose logs openclaw-workspace-sync
 
 If the gateway fails healthchecks or exits: confirm **`openclaw-config-sync`** completed successfully (the gateway waits on it). If **`OPENCLAW_GATEWAY_TOKEN`** is missing in `.env`, set one (`openssl rand -hex 32`) and restart: `docker compose up -d openclaw-gateway`.
 
+### Discord — “This channel is not allowed” / slash commands fail in `#general`
+
+OpenClaw defaults to **`channels.discord.groupPolicy: "allowlist"`**. With allowlist, **your server must appear under `channels.discord.guilds`**, or **every guild channel** (including `#general`) is denied for messages **and native slash commands** like `/new`.
+
+1. Get your **guild (server) ID** from a channel URL: `https://discord.com/channels/<GUILD_ID>/<CHANNEL_ID>` — use **`GUILD_ID`** (not the channel id unless you are configuring per-channel overrides).
+2. **AI-toolkit:** set **`OPENCLAW_DISCORD_GUILD_IDS=<GUILD_ID>`** in `.env` (comma-separated for multiple servers), then:
+   ```bash
+   docker compose run --rm openclaw-config-sync
+   docker compose up -d openclaw-gateway
+   ```
+   `merge_gateway_config.py` will add `channels.discord.guilds.<id>` with `requireMention: false` for new entries. If you already have a `guilds` block, add the id by hand or merge carefully.
+3. **Manual:** edit `data/openclaw/openclaw.json` and add:
+   ```json
+   "channels": {
+     "discord": {
+       "guilds": {
+         "YOUR_GUILD_ID": { "requireMention": false }
+       }
+     }
+   }
+   ```
+   If a guild has a **`channels`** sub-object listing only some channel names/ids, **unlisted channels are denied** — remove the per-channel list or add `#general` (see [OpenClaw Discord docs](https://docs.openclaw.ai/channels/discord)).
+
 ### Discord / channel token (SecretRef)
 
 If logs show **`Config invalid`** / **`channels.discord.token: Invalid input`** (or Telegram equivalent):
@@ -109,6 +132,40 @@ If logs show **`Config invalid`** / **`channels.discord.token: Invalid input`** 
 See [SECURITY_HARDENING.md](SECURITY_HARDENING.md) §11 (OpenClaw secrets).
 
 More detail: [openclaw/README.md](../../openclaw/README.md).
+
+### Browser tool, `web_fetch`, and `elevated` (Docker gateway)
+
+Symptoms from **Control UI / webchat** (e.g. “No supported browser”, “Sandbox browser is unavailable”, `web_fetch` **Blocked hostname or private/internal**, **`elevated is not available`**):
+
+| Symptom | Cause | What to do |
+|--------|--------|------------|
+| **`browser`** / sandbox browser errors | The **`openclaw-gateway`** image does not ship Chrome/Edge; sandbox browser needs extra Docker-sandbox setup (not enabled in default compose). | For **screenshots of this stack**, use **Playwright MCP** via **`gateway__call`** (navigate + screenshot tools from the live tool list). Use **`http://dashboard:8080`**, **`http://openclaw-gateway:6680`**, etc. — **not** **`http://localhost:8080`** (containers do not see the host’s localhost). Keep **`playwright`** in **`data/mcp/servers.txt`**. |
+| **“Chrome binary isn’t available” / local Playwright** | The model (or a built-in tool) is using a **browser or Playwright path inside `openclaw-gateway`**, where there is **no** Chromium. That is **not** the same as **Playwright MCP**: browsers run in **`mcp/playwright`** containers spawned by **`mcp-gateway`** (Docker socket on **`mcp-gateway`**). | **Do not** rely on a generic “playwright” or **`browser`** tool name alone. Use **MCP** explicitly: flat tools **`gateway__playwright__browser_navigate`**, **`gateway__playwright__browser_snapshot`**, **`gateway__playwright__browser_take_screenshot`**, or **`gateway__call`** with **`tool`**: **`playwright__browser_navigate`** (and matching **`args`**). Verify **`plugins.entries["openclaw-mcp-bridge"].config.servers.gateway.url`** in **`data/openclaw/openclaw.json`** is **`http://mcp-gateway:8811/mcp`**, **`docker compose ps mcp-gateway`** is healthy, and **`playwright`** appears in **`data/mcp/servers.txt`**. After upgrading images: **`docker compose pull`** (or pre-pull **`mcp/playwright`**) so the catalog image is present. |
+| **`web_fetch`** blocked private URL | By design (SSRF protection). | Same as above: **Playwright** on the MCP network, or **`exec`/`curl`** to internal hostnames if appropriate. |
+| **`elevated is not available`** (webchat) | OpenClaw gates **`elevated`** per channel/provider. | **Optional (security-sensitive):** set **`OPENCLAW_ELEVATED_ALLOW_WEBCHAT=1`** in `.env`, run **`docker compose run --rm openclaw-config-sync`**, restart **`openclaw-gateway`**. This still **does not** add **`apt`**/Chrome to the container; **`sudo apt`** inside the gateway usually fails (non-root, read-only-ish image). Prefer **Playwright** for browser capture and **host** installs for a real desktop browser. |
+
+Workspace contract: **`openclaw/workspace/TOOLS.md`** and **`AGENTS.md`** (browser bullet).
+
+### OpenClaw — unrestricted `exec` inside the gateway container (downloads, `apt`, etc.)
+
+By default OpenClaw uses conservative **exec** approvals / **`host=sandbox`** behavior. To let the agent run shell commands on the **gateway container** with **`security=full`** and **`ask=off`**, and enable **elevated** for **webchat** and **Discord**:
+
+1. Set **`OPENCLAW_UNRESTRICTED_GATEWAY_CONTAINER=1`** in `.env`.
+2. Run **`docker compose run --rm openclaw-config-sync`** and restart **`openclaw-gateway`**.
+
+The gateway still runs as the image user (**`node`**) unless you add root:
+
+3. For **`apt install`** and similar, the process usually must be **root**. Use the optional override:
+   ```bash
+   docker compose -f docker-compose.yml -f overrides/openclaw-gateway-root.yml up -d openclaw-gateway
+   ```
+   (Re-run **`openclaw-config-sync`** with the same **`-f`** list so env is applied.)
+
+**Security:** this is appropriate only on **trusted** machines. The agent can alter the container filesystem, install packages, and exfiltrate data it can reach on Docker networks. It does **not** grant host-root outside the container unless you mount dangerous volumes.
+
+**Config shape:** OpenClaw **2026.3.x** expects **`tools.elevated.allowFrom.<provider>`** to be a **string array** (e.g. **`["*"]`** for all senders), not **`true`**. If you see **`expected array, received boolean`**, run **`openclaw-config-sync`** again — **`merge_gateway_config.py`** rewrites legacy booleans to **`["*"]`**.
+
+Lighter option (elevated for Control UI only): **`OPENCLAW_ELEVATED_ALLOW_WEBCHAT=1`** without full exec relaxation.
 
 ### OpenClaw cron jobs and Discord delivery
 

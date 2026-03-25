@@ -30,6 +30,10 @@ from dashboard.services_catalog import OPS_SERVICE_MAP
 from dashboard.settings import AUTH_REQUIRED as _AUTH_REQUIRED
 from dashboard.settings import DASHBOARD_AUTH_TOKEN, OPENCLAW_CONFIG_PATH
 
+# Match model-gateway num_ctx + merge_gateway_config.py (OpenClaw compaction vs Ollama truncation).
+_ctx_raw = os.environ.get("OLLAMA_NUM_CTX", "16384").strip()
+OPENCLAW_CONTEXT_WINDOW = int(_ctx_raw) if _ctx_raw.isdigit() and int(_ctx_raw) > 0 else 16384
+
 # Dashboard auth (optional bearer token only; see dashboard.settings)
 
 
@@ -1358,7 +1362,7 @@ def _make_openclaw_model(item: dict) -> dict:
         "reasoning": is_reasoning,
         "input": ["text", "image"] if has_vision else ["text"],
         "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
-        "contextWindow": int(os.environ.get("OLLAMA_NUM_CTX", "16384")),
+        "contextWindow": OPENCLAW_CONTEXT_WINDOW,
         "maxTokens": 8192,
     }
 

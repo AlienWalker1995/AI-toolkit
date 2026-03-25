@@ -107,7 +107,7 @@ See [n8n MCP Client Tool docs](https://docs.n8n.io/integrations/builtin/cluster-
 
 **ComfyUI tools are not a separate MCP server.** They are registered on **`mcp-gateway:8811`** (via the `comfyui` catalog server + `registry-custom.yaml`). The OpenClaw plugin uses **one** URL — the gateway. Flat tools like **`gateway__comfyui__…`** depend on **tool discovery timing**; **`gateway__call`** always works once the gateway responds. See [**mcp/docs/comfyui-openclaw.md**](docs/comfyui-openclaw.md).
 
-Many OpenClaw builds (e.g. 2026.2.x from `ghcr.io/phioranex/openclaw-docker`) **do not accept a top-level `mcp` key** in `openclaw.json`. Use the **openclaw-mcp-bridge** plugin instead.
+Many OpenClaw builds (e.g. 2026.2.x+ from `ghcr.io/openclaw/openclaw`) **do not accept a top-level `mcp` key** in `openclaw.json`. Use the **openclaw-mcp-bridge** plugin instead.
 
 **Recommended — plugin (works when top-level `mcp` is rejected):**
 

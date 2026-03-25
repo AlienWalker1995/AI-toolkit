@@ -35,9 +35,13 @@ All notable changes to this project are documented here. The format is loosely b
 
 ### Fixed
 
+- **OpenClaw gateway (official image):** Compose no longer passes **`gateway`** as the only command (Docker’s **`node`** entrypoint treated it as **`/app/gateway`** and crashed with **`MODULE_NOT_FOUND`**). **`openclaw-gateway`** and **`openclaw-plugin-install`** now run **`node /app/dist/index.js …`** like [upstream `docker-compose.yml`](https://github.com/openclaw/openclaw/blob/main/docker-compose.yml).
+
 - **openclaw-mcp-bridge (fork):** **`registerFlatMcpTools`** no longer marks registration “done” when **zero** MCP tools were discovered (e.g. **mcp-gateway** still starting). Retries on **`session_start`** up to **12** attempts, then logs and stops. Reduces **`Tool not found` for `gateway__comfyui__run_workflow`** when flat tools never registered.
 
 ### Changed
+
+- **OpenClaw Docker image:** Default compose image is now the official **`ghcr.io/openclaw/openclaw:2026.3.23`** ([release](https://github.com/openclaw/openclaw/releases/tag/v2026.3.23), [package](https://github.com/openclaw/openclaw/pkgs/container/openclaw)) instead of **`ghcr.io/phioranex/openclaw-docker:latest`**. Override with **`OPENCLAW_IMAGE`** in `.env`.
 
 - **Docs — architecture:** Index at [`docs/architecture/README.md`](docs/architecture/README.md). Removed **`mcp-comfyui-reliability.md`** and **`openclaw-comfyui-n8n-parity.md`** in favor of **`comfyui-openclaw-mcp.md`** — why the stack feels brittle, **`gateway__call`** vs flat tools, Dashboard/n8n alternatives, and the parity matrix.
 

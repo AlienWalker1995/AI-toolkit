@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 import urllib.request
 from pathlib import Path
@@ -18,34 +19,123 @@ GATEWAY_PROVIDER = {
     "headers": {"X-Service-Name": "openclaw"},
 }
 
-# Default models when model-gateway is unreachable. First entry is the default.
-# Use bare IDs (no ollama/ prefix) — the gateway resolves provider from the ID.
-DEFAULT_GATEWAY_MODELS = [
-    {"id": "qwen3:8b", "name": "Qwen3 8B", "reasoning": True, "input": ["text"],
-     "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0}, "contextWindow": 16384, "maxTokens": 8192},
-    {"id": "deepseek-r1:7b", "name": "DeepSeek R1 7B", "reasoning": True, "input": ["text"],
-     "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0}, "contextWindow": 16384, "maxTokens": 8192},
-    {"id": "qwen3:14b", "name": "Qwen3 14B", "reasoning": True, "input": ["text"],
-     "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0}, "contextWindow": 16384, "maxTokens": 8192},
-    {"id": "deepseek-coder:6.7b", "name": "DeepSeek Coder 6.7B", "reasoning": False, "input": ["text"],
-     "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0}, "contextWindow": 16384, "maxTokens": 8192},
-    {"id": "llama3.2-vision:11b", "name": "Llama 3.2 Vision 11B", "reasoning": False, "input": ["text", "image"],
-     "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0}, "contextWindow": 16384, "maxTokens": 8192},
-    {"id": "nomic-embed-text:latest", "name": "Nomic Embed", "reasoning": False, "input": ["text"],
-     "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0}, "contextWindow": 8192, "maxTokens": 8192},
-]
-
 MODEL_GATEWAY_URL = os.environ.get("MODEL_GATEWAY_URL", "http://model-gateway:11435")
 # Use the actual Ollama context cap — not the model's theoretical maximum.
 # OpenClaw uses contextWindow to decide when to compact; if it's set too high,
 # compaction never fires but Ollama silently truncates at OLLAMA_NUM_CTX.
+# OLLAMA_NUM_CTX=0 in model-gateway means "model max"; for OpenClaw we still use a positive default.
 _ctx_raw = os.environ.get("OLLAMA_NUM_CTX", "16384").strip()
 OLLAMA_NUM_CTX = int(_ctx_raw) if _ctx_raw.isdigit() and int(_ctx_raw) > 0 else 16384
+
+# OpenClaw 2026.3.x: tools.elevated.allowFrom.<provider> is a string[] (sender allowlist), not boolean.
+_ELEVATED_ALLOW_ALL_SENDERS = ["*"]
+
+
+def _sanitize_elevated_allow_from_legacy_booleans(data: dict) -> bool:
+    """Convert invalid allowFrom boolean true (from older merge) to ['*'] so the gateway starts."""
+    modified = False
+    tools = data.get("tools")
+    if not isinstance(tools, dict):
+        return False
+    elev = tools.get("elevated")
+    if not isinstance(elev, dict):
+        return False
+    af = elev.get("allowFrom")
+    if not isinstance(af, dict):
+        return False
+    for k, v in list(af.items()):
+        if v is True:
+            af[k] = list(_ELEVATED_ALLOW_ALL_SENDERS)
+            modified = True
+    return modified
+
+
+def _set_elevated_allow_from_all(allow_from: dict, key: str) -> bool:
+    """Set allowFrom[key] to ['*'] if missing, empty list, or legacy boolean (handled by sanitizer)."""
+    modified = False
+    cur = allow_from.get(key)
+    if cur is True or cur is None:
+        allow_from[key] = list(_ELEVATED_ALLOW_ALL_SENDERS)
+        modified = True
+    elif isinstance(cur, list) and len(cur) == 0:
+        allow_from[key] = list(_ELEVATED_ALLOW_ALL_SENDERS)
+        modified = True
+    return modified
+
+
+# Default models when model-gateway is unreachable. First entry is the default.
+# Use bare IDs (no ollama/ prefix) — the gateway resolves provider from the ID.
+DEFAULT_GATEWAY_MODELS = [
+    {"id": "qwen3:8b", "name": "Qwen3 8B", "reasoning": True, "input": ["text"],
+     "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0}, "contextWindow": OLLAMA_NUM_CTX, "maxTokens": 8192},
+    {"id": "deepseek-r1:7b", "name": "DeepSeek R1 7B", "reasoning": True, "input": ["text"],
+     "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0}, "contextWindow": OLLAMA_NUM_CTX, "maxTokens": 8192},
+    {"id": "qwen3:14b", "name": "Qwen3 14B", "reasoning": True, "input": ["text"],
+     "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0}, "contextWindow": OLLAMA_NUM_CTX, "maxTokens": 8192},
+    {"id": "deepseek-coder:6.7b", "name": "DeepSeek Coder 6.7B", "reasoning": False, "input": ["text"],
+     "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0}, "contextWindow": OLLAMA_NUM_CTX, "maxTokens": 8192},
+    {"id": "llama3.2-vision:11b", "name": "Llama 3.2 Vision 11B", "reasoning": False, "input": ["text", "image"],
+     "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0}, "contextWindow": OLLAMA_NUM_CTX, "maxTokens": 8192},
+    {"id": "nomic-embed-text:latest", "name": "Nomic Embed", "reasoning": False, "input": ["text"],
+     "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0}, "contextWindow": min(OLLAMA_NUM_CTX, 8192), "maxTokens": 8192},
+]
+
+
+def _normalize_env_secret_id(raw: str) -> str:
+    """Match OpenClaw EnvSecretRef id: /^[A-Z][A-Z0-9_]{0,127}$/ (see zod-schema.core.ts)."""
+    s = raw.strip().upper().replace("-", "_")
+    s = re.sub(r"[^A-Z0-9_]", "", s)
+    if not s:
+        return ""
+    m = re.search(r"[A-Z]", s)
+    if not m:
+        return ""
+    s = s[m.start() :]
+    s = re.sub(r"[^A-Z0-9_]", "", s)
+    if len(s) > 128:
+        s = s[:128]
+    if not s or not ("A" <= s[0] <= "Z"):
+        return ""
+    return s
 
 
 def _secret_ref(env_id: str) -> dict:
     # OpenClaw schema requires `provider` (see SecretRef / openclaw config set --ref-provider default).
-    return {"source": "env", "provider": "default", "id": env_id}
+    nid = _normalize_env_secret_id(env_id)
+    if not nid:
+        raise ValueError(f"Invalid env secret id after normalization: {env_id!r}")
+    return {"source": "env", "provider": "default", "id": nid}
+
+
+def _sanitize_channel_env_secret_refs(data: dict) -> bool:
+    """Fix existing channels.* env SecretRefs (hyphenated/lowercase ids, wrong provider case)."""
+    modified = False
+    channels = data.get("channels")
+    if not isinstance(channels, dict):
+        return False
+    for ch_name, field in (("discord", "token"), ("telegram", "botToken")):
+        c = channels.get(ch_name)
+        if not isinstance(c, dict):
+            continue
+        ref = c.get(field)
+        if not isinstance(ref, dict) or ref.get("source") != "env":
+            continue
+        new_ref = dict(ref)
+        changed = False
+        if isinstance(new_ref.get("id"), str):
+            nid = _normalize_env_secret_id(new_ref["id"])
+            if nid and nid != new_ref["id"]:
+                new_ref["id"] = nid
+                changed = True
+        if isinstance(new_ref.get("provider"), str):
+            pl = new_ref["provider"].strip().lower()
+            if pl != new_ref["provider"]:
+                new_ref["provider"] = pl
+                changed = True
+        if changed:
+            c[field] = new_ref
+            modified = True
+    return modified
 
 
 def _inject_channel_secret_refs(data: dict) -> bool:
@@ -75,6 +165,115 @@ def _inject_channel_secret_refs(data: dict) -> bool:
                 ct["botToken"] = ref
                 modified = True
 
+    return modified
+
+
+def _merge_elevated_allow_webchat(data: dict) -> bool:
+    """If OPENCLAW_ELEVATED_ALLOW_WEBCHAT=1, enable tools.elevated for webchat sessions."""
+    if os.environ.get("OPENCLAW_ELEVATED_ALLOW_WEBCHAT", "").strip() != "1":
+        return False
+    modified = False
+    tools = data.setdefault("tools", {})
+    if not isinstance(tools, dict):
+        return False
+    elev = tools.setdefault("elevated", {})
+    if not isinstance(elev, dict):
+        return False
+    allow_from = elev.setdefault("allowFrom", {})
+    if not isinstance(allow_from, dict):
+        allow_from = {}
+        elev["allowFrom"] = allow_from
+    if elev.get("enabled") is not True:
+        elev["enabled"] = True
+        modified = True
+    if _set_elevated_allow_from_all(allow_from, "webchat"):
+        modified = True
+    return modified
+
+
+def _merge_unrestricted_gateway_container(data: dict) -> bool:
+    """If OPENCLAW_UNRESTRICTED_GATEWAY_CONTAINER=1, relax exec + elevated for the gateway container.
+
+    OpenClaw still runs only inside the container boundary unless you mount host paths.
+    Pair with overrides/openclaw-gateway-root.yml (user 0:0) if you need apt/system package installs.
+    """
+    if os.environ.get("OPENCLAW_UNRESTRICTED_GATEWAY_CONTAINER", "").strip() != "1":
+        return False
+    modified = False
+    tools = data.setdefault("tools", {})
+    if not isinstance(tools, dict):
+        return False
+
+    # Exec on gateway (this container), no approval allowlist gate (see OpenClaw exec docs).
+    ex = tools.setdefault("exec", {})
+    if isinstance(ex, dict):
+        if ex.get("host") != "gateway":
+            ex["host"] = "gateway"
+            modified = True
+        if ex.get("security") != "full":
+            ex["security"] = "full"
+            modified = True
+        if ex.get("ask") != "off":
+            ex["ask"] = "off"
+            modified = True
+
+    elev = tools.setdefault("elevated", {})
+    if isinstance(elev, dict):
+        allow_from = elev.setdefault("allowFrom", {})
+        if not isinstance(allow_from, dict):
+            allow_from = {}
+            elev["allowFrom"] = allow_from
+        if elev.get("enabled") is not True:
+            elev["enabled"] = True
+            modified = True
+        for key in ("webchat", "discord"):
+            if _set_elevated_allow_from_all(allow_from, key):
+                modified = True
+
+    agents = data.setdefault("agents", {})
+    if isinstance(agents, dict):
+        defaults = agents.setdefault("defaults", {})
+        if isinstance(defaults, dict):
+            if defaults.get("elevatedDefault") != "full":
+                defaults["elevatedDefault"] = "full"
+                modified = True
+
+    return modified
+
+
+def _merge_discord_guild_allowlist_from_env(data: dict) -> bool:
+    """Register guild IDs in channels.discord.guilds when OPENCLAW_DISCORD_GUILD_IDS is set.
+
+    With groupPolicy allowlist (OpenClaw default), messages and slash commands are rejected
+    until each server is listed under channels.discord.guilds. Per upstream docs, if a guild
+    has no per-channel `channels` block, all channels in that guild are allowed.
+    """
+    raw = os.environ.get("OPENCLAW_DISCORD_GUILD_IDS", "").strip()
+    if not raw:
+        return False
+    ids = []
+    for part in raw.split(","):
+        p = part.strip()
+        if p.isdigit():
+            ids.append(p)
+    if not ids:
+        return False
+    channels = data.setdefault("channels", {})
+    if not isinstance(channels, dict):
+        return False
+    disc = channels.setdefault("discord", {})
+    if not isinstance(disc, dict):
+        return False
+    guilds = disc.setdefault("guilds", {})
+    if not isinstance(guilds, dict):
+        guilds = {}
+        disc["guilds"] = guilds
+    modified = False
+    for gid in ids:
+        if gid not in guilds:
+            # Private-server default: respond without @mention; adjust in JSON if needed.
+            guilds[gid] = {"requireMention": False}
+            modified = True
     return modified
 
 
@@ -154,11 +353,22 @@ def main() -> int:
     providers = data.setdefault("models", {}).setdefault("providers", {})
     modified = False
     msg = ""
+    if _sanitize_channel_env_secret_refs(data):
+        modified = True
+    if _sanitize_elevated_allow_from_legacy_booleans(data):
+        modified = True
     if _normalize_mcp_bridge_servers(data):
         modified = True
     did_channel_refs = _inject_channel_secret_refs(data)
     if did_channel_refs:
         modified = True
+
+    did_guild_allowlist = False
+    if _merge_discord_guild_allowlist_from_env(data):
+        modified = True
+        did_guild_allowlist = True
+
+    did_unrestricted_container = False
 
     # Strip baseUrl/apiKey from model objects (OpenClaw 2026.2.x rejects them per-model)
     for pv in providers.values() if isinstance(providers, dict) else []:
@@ -242,6 +452,13 @@ def main() -> int:
                     search["enabled"] = False
                     modified = True
 
+    # Opt-in: full exec + elevated in gateway container (security-sensitive). Supersedes webchat-only.
+    if _merge_unrestricted_gateway_container(data):
+        modified = True
+        did_unrestricted_container = True
+    elif _merge_elevated_allow_webchat(data):
+        modified = True
+
     # Disable device pairing (not needed in Docker — token auth is sufficient)
     control_ui = gateway.setdefault("controlUi", {})
     if isinstance(control_ui, dict):
@@ -286,6 +503,10 @@ def main() -> int:
         summary_parts: list[str] = []
         if did_channel_refs:
             summary_parts.append("channel SecretRefs from env")
+        if did_guild_allowlist:
+            summary_parts.append("Discord guild allowlist from OPENCLAW_DISCORD_GUILD_IDS")
+        if did_unrestricted_container:
+            summary_parts.append("unrestricted gateway container (OPENCLAW_UNRESTRICTED_GATEWAY_CONTAINER)")
         if msg:
             summary_parts.append(msg)
         summary = "; ".join(summary_parts) if summary_parts else "updated"

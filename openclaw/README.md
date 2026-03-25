@@ -57,7 +57,7 @@ If you use **`overrides/openclaw-secure.yml`**, the mapped gateway port is typic
 
 **Existing config?** Ensure `plugins.entries["openclaw-mcp-bridge"]` is set as in [mcp/README.md](../mcp/README.md#openclaw); this repo’s `data/openclaw/openclaw.json` already includes it.
 
-**Updating the gateway (Docker):** The Control UI **Update** button runs **`openclaw update`**-style flows (npm/git) that **cannot replace** the gateway binary inside the image, so it often **hangs on “Updating…”**. This stack disables in-app update checks in **`openclaw.json`** (`update.checkOnStart` / `update.auto.enabled`) via **`openclaw/scripts/merge_gateway_config.py`**. To upgrade: **`docker compose pull`** (or pin **`OPENCLAW_IMAGE`**) then **`docker compose up -d openclaw-gateway`**. Set **`OPENCLAW_ALLOW_IN_APP_UPDATE=1`** in `.env` only if you intentionally re-enable UI-driven updates (still unlikely to work in a standard image-only setup). See [Updating](https://docs.openclaw.ai/updating) for native installs.
+**Updating the gateway (Docker):** Default image is **`ghcr.io/openclaw/openclaw`** (official [GHCR package](https://github.com/openclaw/openclaw/pkgs/container/openclaw)); compose pins a release tag (e.g. **`2026.3.23`**). Override with **`OPENCLAW_IMAGE`** in `.env` if needed. The Control UI **Update** button runs **`openclaw update`**-style flows (npm/git) that **cannot replace** the gateway binary inside the image, so it often **hangs on “Updating…”**. This stack disables in-app update checks in **`openclaw.json`** (`update.checkOnStart` / `update.auto.enabled`) via **`openclaw/scripts/merge_gateway_config.py`**. To upgrade: **`docker compose pull`** then **`docker compose up -d openclaw-gateway`**, or bump the pinned tag in **`docker-compose.yml`**. Set **`OPENCLAW_ALLOW_IN_APP_UPDATE=1`** in `.env` only if you intentionally re-enable UI-driven updates (still unlikely to work in a standard image-only setup). See [Updating](https://docs.openclaw.ai/updating) for native installs.
 
 **Not reachable?** When using the main AI-toolkit compose, the gateway is configured with `OPENCLAW_GATEWAY_BIND=lan` so it accepts connections from the host. If you run OpenClaw standalone from `openclaw/`, add `OPENCLAW_GATEWAY_BIND=lan` to your `.env`. Then verify: `docker compose ps` (gateway running), `docker compose logs openclaw-gateway` (no errors).
 
@@ -110,6 +110,10 @@ docker compose run --rm openclaw-cli channels login
 See [OpenClaw Discord docs](https://docs.openclaw.ai/channels/discord) for bot token, guild/channel restrictions, and configuration.
 
 **Telegram:** set `TELEGRAM_BOT_TOKEN` in the root `.env`; the gateway container receives it and the merge step can apply the same SecretRef pattern for `channels.telegram`. See upstream [Telegram channel docs](https://docs.openclaw.ai/channels/telegram).
+
+**Guild allowlist:** set **`OPENCLAW_DISCORD_GUILD_IDS`** (server snowflake from the channel URL) so slash commands work in server channels — see [TROUBLESHOOTING — Discord “channel not allowed”](../docs/runbooks/TROUBLESHOOTING.md#discord--this-channel-is-not-allowed--slash-commands-fail-in-general).
+
+**Unrestricted `exec` in the container (e.g. downloads, `apt`):** set **`OPENCLAW_UNRESTRICTED_GATEWAY_CONTAINER=1`**, re-run **`openclaw-config-sync`**, restart the gateway. For package installs you usually also need **`overrides/openclaw-gateway-root.yml`** (`user: "0:0"`). See [TROUBLESHOOTING — unrestricted exec](../docs/runbooks/TROUBLESHOOTING.md#openclaw--unrestricted-exec-inside-the-gateway-container-downloads-apt-etc).
 
 ## Scheduled jobs (cron) and Discord
 

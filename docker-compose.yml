@@ -147,6 +147,8 @@ services:
       - COMFYUI_URL=http://comfyui:8188
       # OpenClaw model management: dashboard reads/writes openclaw.json to sync models
       - MODEL_GATEWAY_URL=http://model-gateway:11435
+      # OpenClaw contextWindow in synced models (must match model-gateway OLLAMA_NUM_CTX)
+      - OLLAMA_NUM_CTX=${OLLAMA_NUM_CTX:-16384}
       - OPENCLAW_CONFIG_PATH=/openclaw-config/openclaw.json
       - OPENCLAW_GATEWAY_TOKEN=${OPENCLAW_GATEWAY_TOKEN:-}
       - OPENCLAW_GATEWAY_PORT=${OPENCLAW_GATEWAY_PORT:-6680}
@@ -437,6 +439,11 @@ services:
     environment:
       - OPENCLAW_GATEWAY_TOKEN=${OPENCLAW_GATEWAY_TOKEN:-}
       - MODEL_GATEWAY_URL=http://model-gateway:11435
+      - OLLAMA_NUM_CTX=${OLLAMA_NUM_CTX:-16384}
+      # Comma-separated Discord guild snowflake IDs → channels.discord.guilds (required for allowlist policy)
+      - OPENCLAW_DISCORD_GUILD_IDS=${OPENCLAW_DISCORD_GUILD_IDS:-}
+      # Permissive exec + elevated in gateway container (see overrides/openclaw-gateway-root.yml for root)
+      - OPENCLAW_UNRESTRICTED_GATEWAY_CONTAINER=${OPENCLAW_UNRESTRICTED_GATEWAY_CONTAINER:-}
     volumes:
       - ${OPENCLAW_CONFIG_DIR:-${BASE_PATH:-.}/data/openclaw}:/config
       - ${BASE_PATH:-.}/openclaw/scripts:/scripts:ro
@@ -447,7 +454,7 @@ services:
   # Install MCP bridge plugin (optional; npm package v0.1.0 has manifest bug — we use
   # plugin-config instead). Run manually: docker compose run --rm openclaw-plugin-install
   openclaw-plugin-install:
-    image: ${OPENCLAW_IMAGE:-ghcr.io/phioranex/openclaw-docker:latest}
+    image: ${OPENCLAW_IMAGE:-ghcr.io/openclaw/openclaw:2026.3.23}
     restart: "no"
     profiles:
       - openclaw-setup
@@ -458,7 +465,12 @@ services:
       HOME: /home/node
     volumes:
       - ${OPENCLAW_CONFIG_DIR:-${BASE_PATH:-.}/data/openclaw}:/home/node/.openclaw
-    command: ["plugins", "install", "openclaw-mcp-bridge"]
+    command:
+      - node
+      - /app/dist/index.js
+      - plugins
+      - install
+      - openclaw-mcp-bridge
     networks:
       - frontend
 
@@ -574,7 +586,7 @@ services:
 
   openclaw-gateway:
     # Pin to digest when available; only :latest published upstream
-    image: ${OPENCLAW_IMAGE:-ghcr.io/phioranex/openclaw-docker:latest}
+    image: ${OPENCLAW_IMAGE:-ghcr.io/openclaw/openclaw:2026.3.23}
     container_name: openclaw-gateway
     depends_on:
       model-gateway:
@@ -597,7 +609,9 @@ services:
       OPENCLAW_GATEWAY_BIND: "lan"
       # OpenClaw upstream default listen port is 18789; stack + healthcheck expect 6680
       OPENCLAW_GATEWAY_PORT: "6680"
+      # Both names so openclaw.json SecretRef id can be DISCORD_BOT_TOKEN or DISCORD_TOKEN (OpenClaw env ref).
       DISCORD_BOT_TOKEN: ${DISCORD_TOKEN:-}
+      DISCORD_TOKEN: ${DISCORD_TOKEN:-}
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
       # For agent to download ComfyUI models via dashboard API (Option B)
       DASHBOARD_URL: http://dashboard:8080
@@ -634,7 +648,16 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
-    command: ["gateway", "--allow-unconfigured"]
+    # Official image ENTRYPOINT is `node`; subcommands go through dist/index.js (not bare `gateway`).
+    command:
+      - node
+      - /app/dist/index.js
+      - gateway
+      - --bind
+      - ${OPENCLAW_GATEWAY_BIND:-lan}
+      - --port
+      - "6680"
+      - --allow-unconfigured
     networks:
       - frontend
       - backend
@@ -658,7 +681,7 @@ services:
 
   openclaw-cli:
     profiles: [openclaw-cli]
-    image: ${OPENCLAW_IMAGE:-ghcr.io/phioranex/openclaw-docker:latest}
+    image: ${OPENCLAW_IMAGE:-ghcr.io/openclaw/openclaw:2026.3.23}
     depends_on:
       - ollama
       - openclaw-gateway
