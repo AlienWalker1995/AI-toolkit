@@ -1291,6 +1291,108 @@ def _anthropic_tools_to_openai(tools: list[dict]) -> list[dict]:
     ]
 
 
+def _is_anthropic_web_search_tool(t: dict) -> bool:
+    ttype = t.get("type")
+    return isinstance(ttype, str) and ttype.startswith("web_search_")
+
+
+def _anthropic_last_user_text(messages: list[dict]) -> str:
+    for msg in reversed(messages or []):
+        if msg.get("role") != "user":
+            continue
+        content = msg.get("content")
+        if isinstance(content, str):
+            return content.strip()
+        if isinstance(content, list):
+            parts: list[str] = []
+            for b in content:
+                if isinstance(b, dict) and b.get("type") == "text":
+                    parts.append(str(b.get("text", "")))
+            return "\n".join(parts).strip()
+    return ""
+
+
+def _inject_anthropic_system(system: Any, text: str) -> Any:
+    if system is None:
+        return text
+    if isinstance(system, str):
+        return (system.rstrip() + "\n\n" + text) if system.strip() else text
+    if isinstance(system, list):
+        return list(system) + [{"type": "text", "text": text}]
+    return text
+
+
+async def _tavily_search_snippets(query: str, api_key: str) -> str:
+    if not query or not api_key:
+        return ""
+    try:
+        async with AsyncClient(timeout=30.0) as client:
+            r = await client.post(
+                "https://api.tavily.com/search",
+                json={
+                    "api_key": api_key,
+                    "query": query[:2000],
+                    "search_depth": "basic",
+                    "max_results": 8,
+                },
+            )
+            r.raise_for_status()
+            data = r.json()
+    except Exception as exc:
+        logger.warning("Tavily search failed: %s", exc)
+        return ""
+    results = data.get("results") or []
+    lines: list[str] = []
+    for i, res in enumerate(results, 1):
+        if not isinstance(res, dict):
+            continue
+        title = str(res.get("title", ""))
+        url = str(res.get("url", ""))
+        snippet = str(res.get("content", ""))[:600]
+        lines.append(f"{i}. {title}\n   {url}\n   {snippet}")
+    return "\n\n".join(lines)
+
+
+async def _bridge_claude_code_web_search_tools(raw: dict) -> dict:
+    """Strip Anthropic web_search_* server tools (Ollama cannot run them) and inject Tavily text when configured."""
+    tools_in = raw.get("tools") or []
+    if not isinstance(tools_in, list):
+        return raw
+    web_tools = [t for t in tools_in if isinstance(t, dict) and _is_anthropic_web_search_tool(t)]
+    if not web_tools:
+        return raw
+
+    out = dict(raw)
+    remaining = [t for t in tools_in if isinstance(t, dict) and not _is_anthropic_web_search_tool(t)]
+    if remaining:
+        out["tools"] = remaining
+    else:
+        out.pop("tools", None)
+        out.pop("tool_choice", None)
+
+    api_key = os.environ.get("TAVILY_API_KEY", "").strip()
+    if not api_key:
+        logger.warning(
+            "Anthropic web_search tool(s) requested but TAVILY_API_KEY is unset; stripped tools without web context"
+        )
+        return out
+
+    q = _anthropic_last_user_text(out.get("messages") or [])
+    if not q:
+        return out
+
+    snippets = await _tavily_search_snippets(q, api_key)
+    if not snippets:
+        return out
+
+    inject = (
+        "Web search results retrieved for the latest user message (use for grounding; cite URLs when you use facts):\n\n"
+        + snippets
+    )
+    out["system"] = _inject_anthropic_system(out.get("system"), inject)
+    return out
+
+
 def _openai_finish_to_anthropic(finish_reason: str) -> str:
     return {"stop": "end_turn", "tool_calls": "tool_use", "length": "max_tokens"}.get(finish_reason, "end_turn")
 
@@ -1318,6 +1420,7 @@ async def anthropic_messages(request: Request):
     Set ANTHROPIC_BASE_URL=http://model-gateway:11435 and ANTHROPIC_API_KEY=local.
     """
     raw = await request.json()
+    raw = await _bridge_claude_code_web_search_tools(raw)
     model = _resolve_claude_model(raw.get("model", ""))
     stream = raw.get("stream", False)
     msg_id = f"msg_{uuid.uuid4().hex[:24]}"
