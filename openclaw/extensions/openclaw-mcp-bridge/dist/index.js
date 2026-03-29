@@ -45,12 +45,22 @@ function register(api) {
     const mcpManager = new MCPManager(toManagerConfig(config));
     // Register a factory for each configured server's tools.
     // The factory connects lazily on first tool call.
+    // Uses a promise guard to prevent concurrent connectAll() calls from
+    // racing and corrupting the session (double-init → "invalid during
+    // session initialization" errors from the MCP gateway).
     let connected = false;
+    let connectingPromise = null;
     const ensureConnected = async () => {
         if (connected)
             return;
-        await mcpManager.connectAll();
-        connected = true;
+        if (connectingPromise !== null)
+            return connectingPromise;
+        connectingPromise = mcpManager.connectAll().then(() => {
+            connected = true;
+        }).finally(() => {
+            connectingPromise = null;
+        });
+        return connectingPromise;
     };
     // Register a proxy tool per configured server.
     // Each tool connects lazily and forwards calls to the remote MCP server.

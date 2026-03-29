@@ -41,7 +41,10 @@
       "Bash(MSYS_NO_PATHCONV=1 docker exec ordo-ai-stack-openclaw-gateway-1 cat /home/node/.openclaw/extensions/openclaw-mcp-bridge/dist/index.js)",
       "Bash(docker volume:*)",
       "Bash(MSYS_NO_PATHCONV=1 docker exec ordo-ai-stack-openclaw-gateway-1 md5sum /home/node/.openclaw/extensions/openclaw-mcp-bridge/dist/index.js)",
-      "Bash(curl:*)"
+      "Bash(curl:*)",
+      "Bash(find /c/dev/AI-toolkit -type f -name docker-compose*.yml)",
+      "Bash(find /c/dev/AI-toolkit -type f -name *mcp* -o -name *registry*)",
+      "Bash(find /c/dev/AI-toolkit -type f \\\\\\(-name *registry*.yaml -o -name *registry*.yml \\\\\\))"
     ]
   }
 }

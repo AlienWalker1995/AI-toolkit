@@ -651,7 +651,9 @@ export class MCPManager {
                 message.includes("network") ||
                 message.includes("socket") ||
                 message.includes("abort") ||
-                message.includes("not connected"));
+                message.includes("not connected") ||
+                message.includes("invalid during session") ||
+                message.includes("session expired"));
         }
         // Native errors (TypeError from fetch, etc.) are connection errors
         if (error instanceof TypeError) {
